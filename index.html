@@ -1,0 +1,746 @@
+<!doctype html>
+<html lang="et">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Echo Shooter</title>
+<style>
+  html,body{margin:0;height:100%;background:#07090d;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#fff;touch-action:none;user-select:none;-webkit-user-select:none}
+  canvas{display:block;cursor:crosshair}
+  #overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(4,6,10,.84);text-align:center;padding:16px}
+  #overlay.hidden{display:none}
+  #overlay h1{margin:0;font-size:clamp(32px,7vw,56px);letter-spacing:3px;color:#ffcf4a;text-shadow:0 0 24px rgba(255,207,74,.35)}
+  #overlay p{margin:0;max-width:520px;line-height:1.5;color:#c9d1e0}
+  #overlay .score{font-size:28px;font-weight:700}
+  #overlay button{font:inherit;font-size:20px;font-weight:700;padding:12px 34px;border:0;border-radius:10px;background:#ffcf4a;color:#1a1300;cursor:pointer}
+  #overlay button:hover{background:#ffe08a}
+  .keys{font-size:14px;color:#8d97ab}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="overlay">
+  <h1 id="ovTitle">ECHO SHOOTER</h1>
+  <p id="ovText">3 vs 3 meeskonnamäng pimedas. Näed vaenlasi ainult oma taskulambi koonuses —
+    muul ajal reedavad nad ennast <b style="color:#ff5a6a">punaste sammujälgede</b> ja laskude helidega.</p>
+  <p class="keys" id="ovKeys">Arvuti: <b>WASD</b> liigu · <b>hiir</b> sihi · relv tulistab ise, kui vaenlane on sihikul (või hoia hiirenuppu) · <b>R</b> lae<br>
+    Telefon: vasak pool ekraanist liigub, parem pool sihib</p>
+  <button id="ovBtn">ALUSTA</button>
+</div>
+<script>
+'use strict';
+// ---------- seaded ----------
+const T = 48;                 // ruudu suurus
+const MAG = 24, FIRE_DELAY = 0.11, DMG = 9, BULLET_SPEED = 1150, RELOAD = 1.6;
+const SPEED = 190, SPEED_FIRING = 110;
+const VIEW = 520, CONE = 0.5, NEAR = 78;   // nägemisulatus, koonuse pool-nurk, lähiring
+const HEAR_STEPS = 700, HEAR_SHOTS = 1000;
+
+// Kaardi vasak pool, parem pool peegeldatakse
+const HALF = [
+  '###############',
+  '#..............',
+  '#..............',
+  '#...####.....#.',
+  '#...#........#.',
+  '#...#...##.....',
+  '#.......##.....',
+  '##.............',
+  '#.....#....###.',
+  '#.....#........',
+  '#.....#........',
+  '#....###.......',
+  '#..........#...',
+  '#..##......#...',
+  '#..#...........',
+  '#..#.....##....',
+  '#........##....',
+  '#..............',
+  '#..............',
+  '###############',
+];
+const MAP = HALF.map(r => r + [...r].reverse().join(''));
+const W = MAP[0].length, H = MAP.length;
+const solid = (tx, ty) => tx < 0 || ty < 0 || tx >= W || ty >= H || MAP[ty][tx] === '#';
+const solidAt = (x, y) => solid(Math.floor(x / T), Math.floor(y / T));
+
+// ---------- abifunktsioonid ----------
+const TAU = Math.PI * 2;
+const angDiff = (a, b) => ((a - b + Math.PI) % TAU + TAU) % TAU - Math.PI;
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+
+// Kiire kiire-ruudustiku läbimine (DDA): tagastab kauguse esimese seinani
+function castRay(x, y, ang, maxDist) {
+  const dx = Math.cos(ang), dy = Math.sin(ang);
+  let mx = Math.floor(x / T), my = Math.floor(y / T);
+  const stepX = dx > 0 ? 1 : -1, stepY = dy > 0 ? 1 : -1;
+  const tdx = dx !== 0 ? Math.abs(T / dx) : Infinity;
+  const tdy = dy !== 0 ? Math.abs(T / dy) : Infinity;
+  let tmx = dx > 0 ? ((mx + 1) * T - x) / dx : dx < 0 ? (x - mx * T) / -dx : Infinity;
+  let tmy = dy > 0 ? ((my + 1) * T - y) / dy : dy < 0 ? (y - my * T) / -dy : Infinity;
+  for (;;) {
+    let t;
+    if (tmx < tmy) { t = tmx; tmx += tdx; mx += stepX; } else { t = tmy; tmy += tdy; my += stepY; }
+    if (t > maxDist) return maxDist;
+    if (solid(mx, my)) return t;
+  }
+}
+
+// Kas üksus a näeb üksust b?
+function sees(a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy);
+  if (d > VIEW) return false;
+  const ang = Math.atan2(dy, dx);
+  if (d > NEAR && Math.abs(angDiff(ang, a.angle)) > CONE + Math.atan2(b.r, d)) return false;
+  return castRay(a.x, a.y, ang, d) >= d - 2;
+}
+
+// BFS teekond ruutude kaupa
+function findPath(sx, sy, gx, gy) {
+  if (solid(gx, gy)) return [];
+  const prev = new Int32Array(W * H).fill(-1);
+  const start = sy * W + sx, goal = gy * W + gx;
+  const q = [start]; prev[start] = start;
+  for (let qi = 0; qi < q.length; qi++) {
+    const cur = q[qi];
+    if (cur === goal) break;
+    const cx = cur % W, cy = (cur / W) | 0;
+    for (const [ox, oy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const nx = cx + ox, ny = cy + oy;
+      if (solid(nx, ny)) continue;
+      const n = ny * W + nx;
+      if (prev[n] !== -1) continue;
+      prev[n] = cur; q.push(n);
+    }
+  }
+  if (prev[goal] === -1) return [];
+  const path = [];
+  for (let c = goal; c !== start; c = prev[c]) path.push({ x: (c % W) * T + T / 2, y: ((c / W) | 0) * T + T / 2 });
+  return path.reverse();
+}
+
+const OPEN = [];
+for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (!solid(x, y)) OPEN.push({ x, y });
+
+// ---------- eelrenderdatud kaardikihid ----------
+const floorC = document.createElement('canvas'), wallC = document.createElement('canvas');
+floorC.width = wallC.width = W * T; floorC.height = wallC.height = H * T;
+(function prerender() {
+  const f = floorC.getContext('2d');
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    f.fillStyle = (x + y) % 2 ? '#1b202b' : '#1e2430';
+    f.fillRect(x * T, y * T, T, T);
+  }
+  f.strokeStyle = 'rgba(255,255,255,.035)';
+  for (let x = 0; x <= W; x++) { f.beginPath(); f.moveTo(x * T, 0); f.lineTo(x * T, H * T); f.stroke(); }
+  for (let y = 0; y <= H; y++) { f.beginPath(); f.moveTo(0, y * T); f.lineTo(W * T, y * T); f.stroke(); }
+  const w = wallC.getContext('2d');
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (solid(x, y)) {
+    w.fillStyle = '#2b3242'; w.fillRect(x * T, y * T, T, T);
+    w.fillStyle = '#3a4357'; w.fillRect(x * T + 3, y * T + 3, T - 6, T - 9);
+    if (!solid(x, y + 1)) { w.fillStyle = '#20252f'; w.fillRect(x * T, y * T + T - 6, T, 6); }
+  }
+})();
+
+// ---------- canvas ----------
+const cvs = document.getElementById('c'), ctx = cvs.getContext('2d');
+const fog = document.createElement('canvas'), fctx = fog.getContext('2d');
+let vw, vh, dpr, zoom;
+function resize() {
+  dpr = Math.min(2, window.devicePixelRatio || 1);
+  vw = innerWidth; vh = innerHeight;
+  cvs.width = fog.width = Math.round(vw * dpr);
+  cvs.height = fog.height = Math.round(vh * dpr);
+  cvs.style.width = vw + 'px'; cvs.style.height = vh + 'px';
+  zoom = clamp(Math.max(vw, vh) / 1250, 0.55, 1.1);
+}
+addEventListener('resize', resize); resize();
+
+// ---------- sisend ----------
+const keys = {};
+const mouse = { x: 0, y: 0, down: false, used: false };
+let isTouch = false;
+addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'KeyR' && player && player.alive) startReload(player);
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
+});
+addEventListener('keyup', e => { keys[e.code] = false; });
+cvs.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; mouse.used = true; });
+cvs.addEventListener('mousedown', e => { if (e.button === 0) mouse.down = true; });
+addEventListener('mouseup', () => { mouse.down = false; });
+cvs.addEventListener('contextmenu', e => e.preventDefault());
+
+const STICK_R = 60;
+const sticks = { L: { id: null, ox: 0, oy: 0, x: 0, y: 0 }, R: { id: null, ox: 0, oy: 0, x: 0, y: 0 } };
+cvs.addEventListener('touchstart', e => {
+  e.preventDefault(); isTouch = true;
+  for (const t of e.changedTouches) {
+    const s = t.clientX < vw / 2 ? sticks.L : sticks.R;
+    if (s.id !== null) continue;
+    s.id = t.identifier; s.ox = t.clientX; s.oy = t.clientY; s.x = s.y = 0;
+  }
+}, { passive: false });
+cvs.addEventListener('touchmove', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) for (const s of [sticks.L, sticks.R]) if (s.id === t.identifier) {
+    let dx = t.clientX - s.ox, dy = t.clientY - s.oy; const m = Math.hypot(dx, dy);
+    if (m > STICK_R) { dx *= STICK_R / m; dy *= STICK_R / m; }
+    s.x = dx / STICK_R; s.y = dy / STICK_R;
+  }
+}, { passive: false });
+const touchEnd = e => {
+  for (const t of e.changedTouches) for (const s of [sticks.L, sticks.R]) if (s.id === t.identifier) { s.id = null; s.x = s.y = 0; }
+};
+cvs.addEventListener('touchend', touchEnd); cvs.addEventListener('touchcancel', touchEnd);
+
+// ---------- mängu olek ----------
+let units = [], bullets = [], marks = [], meds = [], particles = [], feed = [], hitDirs = [];
+let player = null, state = 'menu', endT = 0, round = 0, shake = 0, flashRed = 0;
+const score = [0, 0];
+let visibleEnemies = new Set();
+const NAMES = [['SINA', 'Alfa', 'Bravo'], ['Viper', 'Ghost', 'Rex']];
+
+function makeUnit(team, tile, isPlayer, name) {
+  return {
+    team, isPlayer, name, x: tile.x * T + T / 2, y: tile.y * T + T / 2, r: 15,
+    angle: team === 0 ? 0 : Math.PI, hp: 100, maxHp: 100, ammo: MAG, reloadT: 0, fireCd: 0,
+    alive: true, firing: false, hurtT: 0, flashT: 0, stepAcc: 0, stepSide: 1,
+    ai: { path: [], pathT: 0, goal: null, goalKey: '', wander: null, target: null, react: 0,
+          memory: null, memT: 0, investigate: null, alertAng: 0, alertT: 0, strafe: 1, strafeT: 0,
+          aimErr: 0, aimT: 0, stuckT: 0, lastX: 0, lastY: 0, lookT: 0, lookAng: 0 },
+  };
+}
+
+function pickSpawns(filter, n) {
+  const out = [];
+  for (const t of shuffle(OPEN.filter(filter))) {
+    if (out.every(o => Math.abs(o.x - t.x) + Math.abs(o.y - t.y) > 3)) out.push(t);
+    if (out.length === n) break;
+  }
+  return out;
+}
+
+function startRound() {
+  round++;
+  units = []; bullets = []; marks = []; meds = []; particles = []; feed = []; hitDirs = [];
+  const a = pickSpawns(t => t.x <= 3, 3), b = pickSpawns(t => t.x >= W - 4, 3);
+  for (let i = 0; i < 3; i++) units.push(makeUnit(0, a[i], i === 0, NAMES[0][i]));
+  for (let i = 0; i < 3; i++) units.push(makeUnit(1, b[i], false, NAMES[1][i]));
+  player = units[0];
+  state = 'play'; endT = 0; shake = 0; flashRed = 0;
+  addFeed(`Raund ${round} algas!`, '#ffcf4a');
+}
+
+function addFeed(text, color) { feed.unshift({ text, color, t: 5 }); if (feed.length > 6) feed.pop(); }
+
+// ---------- relv ----------
+function startReload(u) { if (u.reloadT > 0 || u.ammo === MAG) return; u.reloadT = RELOAD; }
+
+function tryFire(u) {
+  if (u.reloadT > 0 || u.fireCd > 0) return false;
+  if (u.ammo <= 0) { startReload(u); return false; }
+  u.fireCd = FIRE_DELAY; u.ammo--; u.flashT = 0.05;
+  const a = u.angle + rand(-1, 1) * (u.isPlayer ? 0.045 : 0.08);
+  let sx = u.x + Math.cos(u.angle) * (u.r + 10), sy = u.y + Math.sin(u.angle) * (u.r + 10);
+  if (solidAt(sx, sy)) { sx = u.x; sy = u.y; }
+  bullets.push({ x: sx, y: sy, px: sx, py: sy, vx: Math.cos(a) * BULLET_SPEED, vy: Math.sin(a) * BULLET_SPEED, team: u.team, owner: u, life: 0.7 });
+  marks.push({ type: 'shot', x: u.x, y: u.y, t: 0.7, team: u.team, src: u });
+  // vastased kuulevad lasku
+  for (const b of units) {
+    if (!b.alive || b.isPlayer || b.team === u.team || b.ai.target) continue;
+    if (dist(b, u) < HEAR_SHOTS) b.ai.investigate = { x: u.x, y: u.y };
+  }
+  if (u.ammo === 0) startReload(u);
+  if (u === camUnit()) shake = Math.max(shake, 1.5);
+  return true;
+}
+
+function damage(victim, shooter) {
+  victim.hp -= DMG; victim.hurtT = 0.12;
+  spawnParticles(victim.x, victim.y, '#ff4a5a', 5);
+  if (!victim.isPlayer) {
+    if (!victim.ai.target) {
+      victim.ai.alertAng = Math.atan2(shooter.y - victim.y, shooter.x - victim.x);
+      victim.ai.alertT = 0.9;
+      victim.ai.investigate = { x: shooter.x, y: shooter.y };
+    }
+  } else {
+    hitDirs.push({ a: Math.atan2(shooter.y - victim.y, shooter.x - victim.x), t: 0.9 });
+    shake = Math.max(shake, 5); flashRed = 0.35;
+  }
+  if (victim.hp <= 0) kill(victim, shooter);
+}
+
+function kill(u, by) {
+  u.alive = false; u.hp = 0;
+  spawnParticles(u.x, u.y, u.team === 0 ? '#4aa3ff' : '#ff4a5a', 22);
+  meds.push({ x: u.x, y: u.y, t: 0 });
+  addFeed(`${by.name} ➜ ${u.name}`, by.team === 0 ? '#7cc1ff' : '#ff7a86');
+}
+
+function spawnParticles(x, y, c, n) {
+  for (let i = 0; i < n; i++) {
+    const a = rand(0, TAU), s = rand(40, 220);
+    particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, t: rand(0.25, 0.6), c });
+  }
+}
+
+// ---------- liikumine ----------
+function collide(u) {
+  const tx0 = Math.floor((u.x - u.r) / T), tx1 = Math.floor((u.x + u.r) / T);
+  const ty0 = Math.floor((u.y - u.r) / T), ty1 = Math.floor((u.y + u.r) / T);
+  for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
+    if (!solid(tx, ty)) continue;
+    const cx = clamp(u.x, tx * T, tx * T + T), cy = clamp(u.y, ty * T, ty * T + T);
+    const dx = u.x - cx, dy = u.y - cy, d = Math.hypot(dx, dy);
+    if (d < u.r && d > 0) { u.x += dx / d * (u.r - d); u.y += dy / d * (u.r - d); }
+  }
+}
+
+function moveUnit(u, mx, my, dt) {
+  const m = Math.hypot(mx, my);
+  if (m < 0.05) return;
+  if (m > 1) { mx /= m; my /= m; }
+  const sp = (u.firing ? SPEED_FIRING : SPEED) * (u.isPlayer ? 1 : 0.92);
+  const ox = u.x, oy = u.y;
+  u.x += mx * sp * dt; u.y += my * sp * dt;
+  collide(u);
+  u.stepAcc += Math.hypot(u.x - ox, u.y - oy);
+  if (u.stepAcc > 34) {
+    u.stepAcc = 0; u.stepSide *= -1;
+    const ma = Math.atan2(my, mx);
+    marks.push({ type: 'step', x: u.x + Math.cos(ma + Math.PI / 2) * 5 * u.stepSide, y: u.y + Math.sin(ma + Math.PI / 2) * 5 * u.stepSide,
+                 a: ma, t: 1.3, team: u.team, src: u });
+    // botid kuulevad lähedalt samme
+    for (const b of units) {
+      if (!b.alive || b.isPlayer || b.team === u.team || b.ai.target) continue;
+      if (dist(b, u) < 300 && Math.random() < 0.35) b.ai.investigate = { x: u.x, y: u.y };
+    }
+  }
+}
+
+function turnTo(u, target, rate, dt) {
+  const d = angDiff(target, u.angle);
+  u.angle += clamp(d, -rate * dt, rate * dt);
+}
+
+// ---------- mängija ----------
+function updatePlayer(u, dt) {
+  let mx = 0, my = 0;
+  if (keys.KeyW || keys.ArrowUp) my -= 1;
+  if (keys.KeyS || keys.ArrowDown) my += 1;
+  if (keys.KeyA || keys.ArrowLeft) mx -= 1;
+  if (keys.KeyD || keys.ArrowRight) mx += 1;
+  mx += sticks.L.x; my += sticks.L.y;
+
+  // lähim vaenlane, keda mängija ise näeb
+  let seen = null, best = Infinity;
+  for (const e of units) if (e.alive && e.team !== u.team && sees(u, e)) {
+    const d = dist(u, e); if (d < best) { best = d; seen = e; }
+  }
+
+  const R = sticks.R, rMag = Math.hypot(R.x, R.y);
+  if (isTouch) {
+    if (R.id !== null && rMag > 0.25) turnTo(u, Math.atan2(R.y, R.x), 14, dt);
+    else if (seen) turnTo(u, Math.atan2(seen.y - u.y, seen.x - u.x), 8, dt);   // sihtimisabi
+    else if (Math.hypot(mx, my) > 0.2) turnTo(u, Math.atan2(my, mx), 10, dt);
+  } else if (mouse.used) {
+    const sx = vw / 2, sy = vh / 2;  // kaamera on mängija peal
+    u.angle = Math.atan2(mouse.y - sy, mouse.x - sx);
+  }
+
+  // automaatne tulistamine, kui vaenlane on sihikul
+  let auto = false;
+  if (seen) auto = Math.abs(angDiff(Math.atan2(seen.y - u.y, seen.x - u.x), u.angle)) < (isTouch ? 0.25 : 0.16);
+  u.firing = false;
+  if (auto || mouse.down) { tryFire(u); u.firing = true; }
+  moveUnit(u, mx, my, dt);
+}
+
+// ---------- bot ----------
+function updateBot(u, dt) {
+  const ai = u.ai;
+  let target = null, best = Infinity;
+  for (const e of units) if (e.alive && e.team !== u.team) {
+    const d = dist(u, e); if (d < best && sees(u, e)) { best = d; target = e; }
+  }
+  if (target !== ai.target) { ai.target = target; if (target) ai.react = rand(0.2, 0.5); }
+  ai.aimT -= dt; if (ai.aimT <= 0) { ai.aimT = 0.3; ai.aimErr = rand(-0.07, 0.07); }
+
+  let mx = 0, my = 0, face = null;
+  u.firing = false;
+
+  if (target) {
+    ai.memory = { x: target.x, y: target.y }; ai.memT = 3.5; ai.investigate = null; ai.path = []; ai.alertT = 0;
+    ai.react -= dt;
+    const a = Math.atan2(target.y - u.y, target.x - u.x);
+    face = a + ai.aimErr;
+    ai.strafeT -= dt;
+    if (ai.strafeT <= 0) { ai.strafeT = rand(0.4, 1.2); ai.strafe = Math.random() < 0.5 ? -1 : 1; }
+    let fwd = best > 380 ? 1 : best < 170 ? -1 : 0;
+    if (u.reloadT > 0) fwd = -1;
+    mx = Math.cos(a) * fwd + Math.cos(a + Math.PI / 2) * ai.strafe * 0.8;
+    my = Math.sin(a) * fwd + Math.sin(a + Math.PI / 2) * ai.strafe * 0.8;
+    if (ai.react <= 0 && Math.abs(angDiff(a, u.angle)) < 0.22) { tryFire(u); u.firing = true; }
+  } else {
+    let goal = null;
+    if (ai.memT > 0) { ai.memT -= dt; goal = ai.memory; if (dist(u, goal) < 30) ai.memT = 0; }
+    else if (ai.investigate) { goal = ai.investigate; if (dist(u, goal) < 40) ai.investigate = null; }
+    if (!goal) {
+      if (!ai.wander || dist(u, ai.wander) < 40) {
+        const t = OPEN[Math.floor(Math.random() * OPEN.length)];
+        ai.wander = { x: t.x * T + T / 2, y: t.y * T + T / 2 };
+      }
+      goal = ai.wander;
+    }
+    const key = Math.floor(goal.x / T) + ',' + Math.floor(goal.y / T);
+    ai.pathT -= dt;
+    if (key !== ai.goalKey || ai.pathT <= 0 || !ai.path.length) {
+      ai.goalKey = key; ai.pathT = 0.8;
+      ai.path = findPath(Math.floor(u.x / T), Math.floor(u.y / T), Math.floor(goal.x / T), Math.floor(goal.y / T));
+    }
+    while (ai.path.length && dist(u, ai.path[0]) < 12) ai.path.shift();
+    const next = ai.path.length ? ai.path[0] : goal;
+    const ma = Math.atan2(next.y - u.y, next.x - u.x);
+    if (dist(u, next) > 4) { mx = Math.cos(ma); my = Math.sin(ma); }
+
+    if (ai.alertT > 0) { ai.alertT -= dt; face = ai.alertAng; }
+    else {
+      // vahel vaatab ringi
+      ai.lookT -= dt;
+      if (ai.lookT <= 0) { ai.lookT = rand(1.5, 3.5); ai.lookAng = rand(-0.9, 0.9); }
+      face = ma + (ai.lookT < 0.6 ? ai.lookAng : 0);
+    }
+    if (u.ammo < MAG * 0.5) startReload(u);
+
+    // kinni jäämise kontroll
+    ai.stuckT += dt;
+    if (ai.stuckT > 1) {
+      if (Math.hypot(u.x - ai.lastX, u.y - ai.lastY) < 20) { ai.path = []; ai.wander = null; ai.investigate = null; }
+      ai.stuckT = 0; ai.lastX = u.x; ai.lastY = u.y;
+    }
+  }
+  if (face !== null) turnTo(u, face, target ? 7 : 6, dt);
+  moveUnit(u, mx, my, dt);
+}
+
+// ---------- uuendamine ----------
+function update(dt) {
+  if (state === 'menu') return;
+  for (const u of units) {
+    if (!u.alive) continue;
+    u.fireCd -= dt; u.hurtT -= dt; u.flashT -= dt;
+    if (u.reloadT > 0) { u.reloadT -= dt; if (u.reloadT <= 0) { u.reloadT = 0; u.ammo = MAG; } }
+    if (state !== 'play') continue;
+    if (u.isPlayer) updatePlayer(u, dt); else updateBot(u, dt);
+  }
+  // üksused ei kattu
+  for (let i = 0; i < units.length; i++) for (let j = i + 1; j < units.length; j++) {
+    const a = units[i], b = units[j];
+    if (!a.alive || !b.alive) continue;
+    const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), min = a.r + b.r;
+    if (d < min && d > 0) {
+      const p = (min - d) / 2;
+      a.x -= dx / d * p; a.y -= dy / d * p; b.x += dx / d * p; b.y += dy / d * p;
+      collide(a); collide(b);
+    }
+  }
+  // kuulid
+  for (const b of bullets) {
+    b.px = b.x; b.py = b.y;
+    const steps = 3;
+    for (let s = 0; s < steps && b.life > 0; s++) {
+      b.x += b.vx * dt / steps; b.y += b.vy * dt / steps;
+      if (solidAt(b.x, b.y)) { b.life = 0; spawnParticles(b.x, b.y, '#c8b98a', 3); break; }
+      for (const u of units) {
+        if (!u.alive || u.team === b.team) continue;
+        if (Math.hypot(u.x - b.x, u.y - b.y) < u.r + 2) { b.life = 0; damage(u, b.owner); break; }
+      }
+    }
+    b.life -= dt;
+  }
+  bullets = bullets.filter(b => b.life > 0);
+  // ravipakid
+  for (const m of meds) {
+    m.t += dt;
+    for (const u of units) if (u.alive && u.hp < u.maxHp && Math.hypot(u.x - m.x, u.y - m.y) < u.r + 14) {
+      u.hp = Math.min(u.maxHp, u.hp + 40); m.taken = true;
+      if (u.isPlayer) addFeed('+40 elu', '#6be38a');
+      break;
+    }
+  }
+  meds = meds.filter(m => !m.taken);
+  for (const m of marks) m.t -= dt;
+  marks = marks.filter(m => m.t > 0);
+  for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.9; p.vy *= 0.9; p.t -= dt; }
+  particles = particles.filter(p => p.t > 0);
+  for (const f of feed) f.t -= dt;
+  feed = feed.filter(f => f.t > 0);
+  for (const h of hitDirs) h.t -= dt;
+  hitDirs = hitDirs.filter(h => h.t > 0);
+  shake *= Math.pow(0.001, dt); flashRed = Math.max(0, flashRed - dt);
+
+  // mida meie meeskond näeb
+  visibleEnemies = new Set();
+  for (const e of units) if (e.alive && e.team === 1)
+    for (const a of units) if (a.alive && a.team === 0 && sees(a, e)) { visibleEnemies.add(e); break; }
+
+  // raundi lõpp
+  if (state === 'play') {
+    const alive0 = units.some(u => u.alive && u.team === 0), alive1 = units.some(u => u.alive && u.team === 1);
+    if (!alive0 || !alive1) {
+      state = 'end'; endT = 1.6;
+      const won = alive0;
+      score[won ? 0 : 1]++;
+      lastResult = won;
+    }
+  } else if (state === 'end') {
+    endT -= dt;
+    if (endT <= 0 && overlay.classList.contains('hidden')) showEnd();
+  }
+}
+let lastResult = false;
+
+function camUnit() {
+  if (player && player.alive) return player;
+  return units.find(u => u.alive && u.team === 0) || player;
+}
+
+// ---------- joonistamine ----------
+function visPoly(u) {
+  const pts = [], N1 = 72, N2 = 36;
+  const s = u.angle - CONE, e = u.angle + CONE;
+  for (let i = 0; i <= N1; i++) {
+    const a = s + (e - s) * i / N1, d = castRay(u.x, u.y, a, VIEW);
+    pts.push(u.x + Math.cos(a) * d, u.y + Math.sin(a) * d);
+  }
+  const rest = TAU - 2 * CONE;
+  for (let i = 1; i < N2; i++) {
+    const a = e + rest * i / N2, d = castRay(u.x, u.y, a, NEAR);
+    pts.push(u.x + Math.cos(a) * d, u.y + Math.sin(a) * d);
+  }
+  return pts;
+}
+function polyPath(c, pts) {
+  c.beginPath(); c.moveTo(pts[0], pts[1]);
+  for (let i = 2; i < pts.length; i += 2) c.lineTo(pts[i], pts[i + 1]);
+  c.closePath();
+}
+
+function drawUnit(u, color, dark) {
+  ctx.save(); ctx.translate(u.x, u.y);
+  ctx.fillStyle = 'rgba(0,0,0,.45)';
+  ctx.beginPath(); ctx.ellipse(3, 5, u.r, u.r * 0.85, 0, 0, TAU); ctx.fill();
+  ctx.rotate(u.angle);
+  ctx.fillStyle = '#15171c'; ctx.fillRect(2, -3.5, u.r + 13, 7);
+  if (u.flashT > 0) {
+    ctx.fillStyle = '#ffe9a0';
+    ctx.beginPath(); ctx.moveTo(u.r + 14, -6); ctx.lineTo(u.r + 30, 0); ctx.lineTo(u.r + 14, 6); ctx.fill();
+  }
+  ctx.fillStyle = dark; ctx.beginPath(); ctx.arc(-6, 0, u.r * 0.7, 0, TAU); ctx.fill();   // seljakott
+  ctx.fillStyle = u.hurtT > 0 ? '#fff' : color;
+  ctx.beginPath(); ctx.arc(0, 0, u.r, 0, TAU); ctx.fill();
+  ctx.lineWidth = 3; ctx.strokeStyle = dark; ctx.stroke();
+  ctx.fillStyle = dark; ctx.beginPath(); ctx.arc(4, 0, 5, 0, TAU); ctx.fill();           // pea
+  ctx.restore();
+  // elu riba
+  const w = 36, hpw = w * u.hp / u.maxHp;
+  ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(u.x - w / 2 - 1, u.y - u.r - 15, w + 2, 6);
+  ctx.fillStyle = u.team === 0 ? (u.isPlayer ? '#6be38a' : '#4aa3ff') : '#ff4a5a';
+  ctx.fillRect(u.x - w / 2, u.y - u.r - 14, hpw, 4);
+  ctx.font = '600 11px system-ui,sans-serif'; ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(255,255,255,.75)'; ctx.fillText(u.name, u.x, u.y - u.r - 19);
+}
+
+function render(now) {
+  const cam = camUnit();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#07090d'; ctx.fillRect(0, 0, cvs.width, cvs.height);
+  if (!cam) return;
+  const ox = vw / 2 - cam.x * zoom + rand(-1, 1) * shake, oy = vh / 2 - cam.y * zoom + rand(-1, 1) * shake;
+  const world = c => c.setTransform(dpr * zoom, 0, 0, dpr * zoom, ox * dpr, oy * dpr);
+
+  world(ctx);
+  ctx.drawImage(floorC, 0, 0);
+  // ravipakid
+  for (const m of meds) {
+    const p = 1 + Math.sin(m.t * 5) * 0.08;
+    ctx.save(); ctx.translate(m.x, m.y); ctx.scale(p, p);
+    ctx.fillStyle = '#e8f6ec'; ctx.fillRect(-10, -10, 20, 20);
+    ctx.fillStyle = '#2bbf5a'; ctx.fillRect(-3, -7, 6, 14); ctx.fillRect(-7, -3, 14, 6);
+    ctx.restore();
+  }
+  // kuulid
+  ctx.lineCap = 'round';
+  for (const b of bullets) {
+    ctx.strokeStyle = b.team === 0 ? 'rgba(255,230,140,.95)' : 'rgba(255,140,120,.95)';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(b.x - b.vx * 0.018, b.y - b.vy * 0.018); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+  for (const p of particles) { ctx.globalAlpha = clamp(p.t * 2, 0, 1); ctx.fillStyle = p.c; ctx.fillRect(p.x - 2, p.y - 2, 4, 4); }
+  ctx.globalAlpha = 1;
+
+  // pimedus + nähtavad alad (kogu meeskonna taskulambid)
+  fctx.setTransform(1, 0, 0, 1, 0, 0);
+  fctx.globalCompositeOperation = 'source-over';
+  fctx.clearRect(0, 0, fog.width, fog.height);
+  fctx.fillStyle = 'rgba(3,5,9,0.9)'; fctx.fillRect(0, 0, fog.width, fog.height);
+  fctx.globalCompositeOperation = 'destination-out';
+  world(fctx);
+  const camPoly = cam.alive ? visPoly(cam) : null;
+  for (const a of units) {
+    if (!a.alive || a.team !== 0) continue;
+    const pts = a === cam ? camPoly : visPoly(a);
+    const g = fctx.createRadialGradient(a.x, a.y, 0, a.x, a.y, VIEW);
+    const k = a === cam ? 1 : 0.75;
+    g.addColorStop(0, `rgba(0,0,0,${k})`); g.addColorStop(0.65, `rgba(0,0,0,${0.9 * k})`); g.addColorStop(1, 'rgba(0,0,0,0)');
+    fctx.fillStyle = g; polyPath(fctx, pts); fctx.fill();
+  }
+  fctx.globalCompositeOperation = 'source-over';
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(fog, 0, 0);
+  world(ctx);
+
+  // soe taskulambi kuma
+  if (camPoly) {
+    ctx.globalCompositeOperation = 'lighter';
+    const g = ctx.createRadialGradient(cam.x, cam.y, 0, cam.x, cam.y, VIEW);
+    g.addColorStop(0, 'rgba(255,225,160,.13)'); g.addColorStop(1, 'rgba(255,225,160,0)');
+    ctx.fillStyle = g; polyPath(ctx, camPoly); ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  ctx.drawImage(wallC, 0, 0);
+
+  // vaenlaste helijäljed (sammud, lasud)
+  for (const m of marks) {
+    if (m.team === 0 || visibleEnemies.has(m.src)) continue;
+    const d = Math.hypot(m.x - cam.x, m.y - cam.y);
+    if (m.type === 'step') {
+      if (d > HEAR_STEPS) continue;
+      ctx.globalAlpha = clamp(m.t / 1.3, 0, 1) * 0.85;
+      ctx.fillStyle = '#ff3b4e';
+      ctx.save(); ctx.translate(m.x, m.y); ctx.rotate(m.a);
+      ctx.beginPath(); ctx.ellipse(0, 0, 6, 3.5, 0, 0, TAU); ctx.fill();
+      ctx.restore();
+    } else {
+      if (d > HEAR_SHOTS) continue;
+      const k = 1 - m.t / 0.7;
+      ctx.globalAlpha = (1 - k) * 0.9;
+      ctx.strokeStyle = '#ff3b4e'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(m.x, m.y, 10 + k * 40, 0, TAU); ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  // üksused
+  for (const u of units) {
+    if (!u.alive) continue;
+    if (u.team === 0) drawUnit(u, u.isPlayer ? '#ffcf4a' : '#4aa3ff', u.isPlayer ? '#6b5212' : '#163a63');
+    else if (visibleEnemies.has(u)) drawUnit(u, '#ff4a5a', '#5e1820');
+  }
+  // tabamuse suunad
+  if (player.alive) for (const h of hitDirs) {
+    ctx.strokeStyle = `rgba(255,60,70,${h.t})`; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(player.x, player.y, 40, h.a - 0.35, h.a + 0.35); ctx.stroke();
+  }
+
+  drawHUD(cam);
+}
+
+function drawHUD(cam) {
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  // punane vinjett
+  const low = player.alive ? 1 - player.hp / player.maxHp : 0;
+  const vig = Math.max(flashRed, low > 0.6 ? (low - 0.6) * 1.2 : 0);
+  if (vig > 0) {
+    const g = ctx.createRadialGradient(vw / 2, vh / 2, Math.min(vw, vh) * 0.3, vw / 2, vh / 2, Math.max(vw, vh) * 0.7);
+    g.addColorStop(0, 'rgba(255,0,0,0)'); g.addColorStop(1, `rgba(200,0,20,${Math.min(0.55, vig)})`);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, vw, vh);
+  }
+  ctx.textBaseline = 'middle';
+  // ülemine riba: meeskonnad
+  const cx = vw / 2;
+  for (let team = 0; team < 2; team++) {
+    const list = units.filter(u => u.team === team);
+    list.forEach((u, i) => {
+      const x = team === 0 ? cx - 40 - i * 24 : cx + 40 + i * 24;
+      ctx.beginPath(); ctx.arc(x, 24, 9, 0, TAU);
+      ctx.fillStyle = u.alive ? (team === 0 ? (u.isPlayer ? '#ffcf4a' : '#4aa3ff') : '#ff4a5a') : 'rgba(255,255,255,.12)';
+      ctx.fill();
+    });
+  }
+  ctx.font = '800 18px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
+  ctx.fillText(`${score[0]} : ${score[1]}`, cx, 24);
+  ctx.font = '600 12px system-ui,sans-serif'; ctx.fillStyle = 'rgba(255,255,255,.55)';
+  ctx.fillText(`RAUND ${round}`, cx, 46);
+
+  // tapmiste voog
+  ctx.textAlign = 'right'; ctx.font = '600 13px system-ui,sans-serif';
+  feed.forEach((f, i) => {
+    ctx.globalAlpha = clamp(f.t, 0, 1);
+    ctx.fillStyle = 'rgba(0,0,0,.45)';
+    const tw = ctx.measureText(f.text).width;
+    ctx.fillRect(vw - 16 - tw - 10, 14 + i * 24, tw + 16, 20);
+    ctx.fillStyle = f.color; ctx.fillText(f.text, vw - 18, 24 + i * 24);
+  });
+  ctx.globalAlpha = 1;
+
+  // elu ja laskemoon
+  const p = player, bx = 16, by = vh - 52, bw = Math.min(240, vw * 0.4);
+  if (p.alive) {
+    ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(bx, by, bw, 18);
+    ctx.fillStyle = p.hp > 35 ? '#6be38a' : '#ff4a5a'; ctx.fillRect(bx + 2, by + 2, (bw - 4) * p.hp / p.maxHp, 14);
+    ctx.textAlign = 'left'; ctx.font = '700 12px system-ui,sans-serif'; ctx.fillStyle = '#0b0d12';
+    ctx.fillText(`${Math.ceil(p.hp)} HP`, bx + 8, by + 10);
+    ctx.font = '800 22px system-ui,sans-serif'; ctx.fillStyle = '#fff';
+    if (p.reloadT > 0) {
+      ctx.fillStyle = '#ffcf4a'; ctx.fillText('LAEN…', bx, by + 36);
+      ctx.fillStyle = 'rgba(255,207,74,.35)'; ctx.fillRect(bx + 80, by + 32, 80 * (1 - p.reloadT / RELOAD), 6);
+    } else ctx.fillText(`${p.ammo} / ${MAG}`, bx, by + 36);
+  } else if (state === 'play') {
+    ctx.textAlign = 'center'; ctx.font = '800 22px system-ui,sans-serif'; ctx.fillStyle = '#ff7a86';
+    ctx.fillText('Said surma — vaatad liitlast', vw / 2, vh - 60);
+  }
+
+  // puutejuhtkangid
+  if (isTouch) for (const s of [sticks.L, sticks.R]) {
+    if (s.id === null) continue;
+    ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(s.ox, s.oy, STICK_R, 0, TAU); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,.3)';
+    ctx.beginPath(); ctx.arc(s.ox + s.x * STICK_R, s.oy + s.y * STICK_R, 24, 0, TAU); ctx.fill();
+  }
+}
+
+// ---------- menüü ----------
+const overlay = document.getElementById('overlay');
+const ovTitle = document.getElementById('ovTitle'), ovText = document.getElementById('ovText');
+const ovKeys = document.getElementById('ovKeys'), ovBtn = document.getElementById('ovBtn');
+function showEnd() {
+  ovTitle.textContent = lastResult ? 'VÕIT!' : 'KAOTUS';
+  ovTitle.style.color = lastResult ? '#6be38a' : '#ff4a5a';
+  ovText.innerHTML = `<span class="score"><span style="color:#4aa3ff">${score[0]}</span> : <span style="color:#ff4a5a">${score[1]}</span></span>`;
+  ovKeys.style.display = 'none';
+  ovBtn.textContent = 'JÄRGMINE RAUND';
+  overlay.classList.remove('hidden');
+}
+ovBtn.addEventListener('click', () => { overlay.classList.add('hidden'); startRound(); });
+
+// ---------- tsükkel ----------
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.033, (now - last) / 1000); last = now;
+  update(dt);
+  if (state !== 'menu') render(now);
+  else { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#07090d'; ctx.fillRect(0, 0, cvs.width, cvs.height); }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
