@@ -4,65 +4,66 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>Echo Shooter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&display=swap" rel="stylesheet">
 <style>
-  html,body{margin:0;height:100%;background:#07090d;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#fff;touch-action:none;user-select:none;-webkit-user-select:none}
-  canvas{display:block;cursor:crosshair}
-  #overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(4,6,10,.84);text-align:center;padding:16px}
+  html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:Oswald,Impact,system-ui,sans-serif;color:#fff;touch-action:none;user-select:none;-webkit-user-select:none}
+  canvas{display:block;cursor:none}
+  #overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:rgba(0,0,0,.78);text-align:center;padding:16px}
   #overlay.hidden{display:none}
-  #overlay h1{margin:0;font-size:clamp(32px,7vw,56px);letter-spacing:3px;color:#ffcf4a;text-shadow:0 0 24px rgba(255,207,74,.35)}
-  #overlay p{margin:0;max-width:520px;line-height:1.5;color:#c9d1e0}
-  #overlay .score{font-size:28px;font-weight:700}
-  #overlay button{font:inherit;font-size:20px;font-weight:700;padding:12px 34px;border:0;border-radius:10px;background:#ffcf4a;color:#1a1300;cursor:pointer}
-  #overlay button:hover{background:#ffe08a}
-  .keys{font-size:14px;color:#8d97ab}
+  #ovTitle{margin:0;font-size:clamp(34px,8vw,64px);font-style:italic;font-weight:700;letter-spacing:1px;color:#fff;background:#e8141f;padding:4px 28px;transform:skew(-8deg);box-shadow:0 8px 30px rgba(232,20,31,.35)}
+  #overlay p{margin:0;max-width:540px;line-height:1.5;color:#c9ced8;font-family:system-ui,sans-serif}
+  #overlay .score{font-family:Oswald,Impact,sans-serif;font-size:44px;font-weight:700;font-style:italic}
+  #overlay button{font:italic 700 22px Oswald,Impact,sans-serif;letter-spacing:1px;padding:10px 40px;border:3px solid #fff;border-radius:999px;background:transparent;color:#fff;cursor:pointer}
+  #overlay button:hover{background:#fff;color:#000}
+  .keys{font-size:14px;color:#8d97ab!important}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <div id="overlay">
-  <h1 id="ovTitle">ECHO SHOOTER</h1>
-  <p id="ovText">3 vs 3 meeskonnamäng pimedas. Näed vaenlasi ainult oma taskulambi koonuses —
-    muul ajal reedavad nad ennast <b style="color:#ff5a6a">punaste sammujälgede</b> ja laskude helidega.</p>
-  <p class="keys" id="ovKeys">Arvuti: <b>WASD</b> liigu · <b>hiir</b> sihi · relv tulistab ise, kui vaenlane on sihikul (või hoia hiirenuppu) · <b>R</b> lae<br>
-    Telefon: vasak pool ekraanist liigub, parem pool sihib</p>
+  <h1 id="ovTitle">PLAY STEALTHY</h1>
+  <p id="ovText">Üksi pimedas majas 5 vastase vastu — igaüks võitleb igaühega. Näed vaenlasi ainult oma taskulambi valguses —
+    muul ajal reedavad nad ennast <b style="color:#ff4a5a">punaste sammujälgede</b> ja laskude helidega.</p>
+  <p class="keys" id="ovKeys">Arvuti: <b>WASD</b> liigu · <b>hiir</b> sihi · relv tulistab ise, kui vaenlane on valguses (või hoia hiirenuppu)<br>
+    <b>R</b> lae · <b>Q</b> ravi · <b>E</b> kilp &nbsp;|&nbsp; Telefon: vasak pool liigub, parem pool sihib</p>
   <button id="ovBtn">ALUSTA</button>
 </div>
 <script>
 'use strict';
 // ---------- seaded ----------
-const T = 48;                 // ruudu suurus
-const MAG = 24, FIRE_DELAY = 0.11, DMG = 9, BULLET_SPEED = 1150, RELOAD = 1.6;
+const T = 32;                                  // ruudu suurus pikslites
+const W = 56, H = 36;                          // kaardi suurus ruutudes
+const MAG = 30, FIRE_DELAY = 0.11, DMG = 50, BULLET_SPEED = 1150, RELOAD = 1.6;
+const MAX_HP = 600, MEDKIT = 240, HEAL = 300, SHIELD_TIME = 4;
 const SPEED = 190, SPEED_FIRING = 110;
-const VIEW = 520, CONE = 0.5, NEAR = 78;   // nägemisulatus, koonuse pool-nurk, lähiring
+const VIEW = 560, CONE = 0.36, NEAR = 70;      // nägemisulatus, koonuse pool-nurk, lähiring
 const HEAR_STEPS = 700, HEAR_SHOTS = 1000;
+const FONT = 'Oswald, Impact, sans-serif';
 
-// Kaardi vasak pool, parem pool peegeldatakse
-const HALF = [
-  '###############',
-  '#..............',
-  '#..............',
-  '#...####.....#.',
-  '#...#........#.',
-  '#...#...##.....',
-  '#.......##.....',
-  '##.............',
-  '#.....#....###.',
-  '#.....#........',
-  '#.....#........',
-  '#....###.......',
-  '#..........#...',
-  '#..##......#...',
-  '#..#...........',
-  '#..#.....##....',
-  '#........##....',
-  '#..............',
-  '#..............',
-  '###############',
-];
-const MAP = HALF.map(r => r + [...r].reverse().join(''));
-const W = MAP[0].length, H = MAP.length;
-const solid = (tx, ty) => tx < 0 || ty < 0 || tx >= W || ty >= H || MAP[ty][tx] === '#';
+// ---------- kaart: maja tubadega (vasak pool, parem peegeldatakse) ----------
+const GRID = Array.from({ length: H }, () => new Uint8Array(W));
+function rect(x1, y1, x2, y2, v = 1) {
+  for (let y = y1; y <= y2; y++) for (let x = x1; x <= x2; x++) { GRID[y][x] = v; GRID[y][W - 1 - x] = v; }
+}
+rect(0, 0, 27, 0); rect(0, H - 1, 27, H - 1); rect(0, 0, 0, H - 1);   // välisseinad
+rect(12, 0, 12, 11); rect(0, 11, 12, 11);                              // magamistuba
+rect(12, 24, 12, 35); rect(0, 24, 12, 24);                             // vannituba
+rect(12, 9, 22, 9); rect(22, 0, 22, 4);                                // söögituba
+rect(12, 27, 22, 27); rect(22, 31, 22, 35);                            // elutuba
+rect(17, 14, 18, 15); rect(17, 20, 18, 21);                            // kattevarjud
+rect(24, 12, 24, 14); rect(24, 21, 24, 23);
+rect(26, 16, 27, 19);                                                  // keskmine sammas
+rect(25, 5, 27, 5); rect(25, 30, 27, 30);
+rect(8, 17, 8, 18);
+rect(12, 4, 12, 6, 0); rect(5, 11, 7, 11, 0);                          // uksed
+rect(12, 28, 12, 30, 0); rect(5, 24, 7, 24, 0);
+rect(16, 9, 18, 9, 0); rect(15, 27, 17, 27, 0);
+
+const solid = (tx, ty) => tx < 0 || ty < 0 || tx >= W || ty >= H || GRID[ty][tx] === 1;
 const solidAt = (x, y) => solid(Math.floor(x / T), Math.floor(y / T));
+const OPEN = [];
+for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (!solid(x, y)) OPEN.push({ x, y });
 
 // ---------- abifunktsioonid ----------
 const TAU = Math.PI * 2;
@@ -72,7 +73,7 @@ const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 
-// Kiire kiire-ruudustiku läbimine (DDA): tagastab kauguse esimese seinani
+// Kiire läbimine ruudustikus (DDA): kaugus esimese seinani
 function castRay(x, y, ang, maxDist) {
   const dx = Math.cos(ang), dy = Math.sin(ang);
   let mx = Math.floor(x / T), my = Math.floor(y / T);
@@ -98,7 +99,7 @@ function sees(a, b) {
   return castRay(a.x, a.y, ang, d) >= d - 2;
 }
 
-// BFS teekond ruutude kaupa
+// BFS teekond
 function findPath(sx, sy, gx, gy) {
   if (solid(gx, gy)) return [];
   const prev = new Int32Array(W * H).fill(-1);
@@ -122,40 +123,167 @@ function findPath(sx, sy, gx, gy) {
   return path.reverse();
 }
 
-const OPEN = [];
-for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (!solid(x, y)) OPEN.push({ x, y });
+// ---------- kaardi joonistamine (põrand + mööbel) ----------
+let seed = 7;
+const srnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
 
-// ---------- eelrenderdatud kaardikihid ----------
-const floorC = document.createElement('canvas'), wallC = document.createElement('canvas');
-floorC.width = wallC.width = W * T; floorC.height = wallC.height = H * T;
+function rr(c, x, y, w, h, r) { c.beginPath(); c.roundRect ? c.roundRect(x, y, w, h, r) : c.rect(x, y, w, h); }
+function woodFloor(c, x, y, w, h, base) {
+  x *= T; y *= T; w *= T; h *= T;
+  c.fillStyle = base; c.fillRect(x, y, w, h);
+  for (let py = y; py < y + h; py += 10) {
+    let px = x - srnd() * 80;
+    while (px < x + w) {
+      const len = 60 + srnd() * 80;
+      c.fillStyle = `rgba(${srnd() < 0.5 ? 0 : 255},${srnd() < 0.5 ? 0 : 200},0,${0.03 + srnd() * 0.05})`;
+      c.fillRect(Math.max(px, x), py, Math.min(len, x + w - px), 9);
+      c.fillStyle = 'rgba(0,0,0,.35)'; c.fillRect(px + len, py, 1, 10);
+      px += len;
+    }
+    c.fillStyle = 'rgba(0,0,0,.3)'; c.fillRect(x, py + 9, w, 1);
+  }
+}
+function tileFloor(c, x, y, w, h, a, b) {
+  for (let ty = 0; ty < h * 2; ty++) for (let tx = 0; tx < w * 2; tx++) {
+    c.fillStyle = (tx + ty) % 2 ? a : b;
+    c.fillRect(x * T + tx * 16, y * T + ty * 16, 16, 16);
+  }
+  c.strokeStyle = 'rgba(0,0,0,.25)'; c.lineWidth = 1;
+  for (let tx = 0; tx <= w * 2; tx++) { c.beginPath(); c.moveTo(x * T + tx * 16, y * T); c.lineTo(x * T + tx * 16, (y + h) * T); c.stroke(); }
+  for (let ty = 0; ty <= h * 2; ty++) { c.beginPath(); c.moveTo(x * T, y * T + ty * 16); c.lineTo((x + w) * T, y * T + ty * 16); c.stroke(); }
+}
+function carpet(c, x, y, w, h, base, border) {
+  c.fillStyle = base; c.fillRect(x * T, y * T, w * T, h * T);
+  c.strokeStyle = border; c.lineWidth = 4; c.strokeRect(x * T + 10, y * T + 10, w * T - 20, h * T - 20);
+  c.fillStyle = 'rgba(255,255,255,.05)';
+  for (let i = 0; i < w * h * 3; i++) c.fillRect(x * T + srnd() * w * T, y * T + srnd() * h * T, 2, 2);
+}
+function bed(c, x, y, w, h) {
+  x *= T; y *= T; w *= T; h *= T;
+  c.fillStyle = '#3c3530'; rr(c, x, y, w, h, 6); c.fill();
+  c.fillStyle = '#d8dbe2'; rr(c, x + 5, y + 5, w - 10, h - 10, 5); c.fill();
+  c.fillStyle = '#f1f2f5'; rr(c, x + 10, y + 9, w / 2 - 14, 22, 6); c.fill(); rr(c, x + w / 2 + 4, y + 9, w / 2 - 14, 22, 6); c.fill();
+  c.fillStyle = '#6d7fa6'; rr(c, x + 5, y + h * 0.38, w - 10, h * 0.62 - 5, 4); c.fill();
+  c.strokeStyle = 'rgba(0,0,0,.2)'; c.lineWidth = 2; c.beginPath(); c.moveTo(x + 5, y + h * 0.45); c.lineTo(x + w - 5, y + h * 0.45); c.stroke();
+}
+function table(c, x, y, w, h) {
+  x *= T; y *= T; w *= T; h *= T;
+  c.fillStyle = '#2c241d';
+  for (let i = 0; i < 3; i++) {
+    const cx = x + w * (i + 0.5) / 3;
+    rr(c, cx - 11, y - 20, 22, 16, 4); c.fill(); rr(c, cx - 11, y + h + 4, 22, 16, 4); c.fill();
+  }
+  c.fillStyle = '#6e5541'; rr(c, x, y, w, h, 4); c.fill();
+  c.strokeStyle = '#4a382b'; c.lineWidth = 3; c.stroke();
+  c.fillStyle = '#d8d8d8'; c.beginPath(); c.arc(x + w * 0.3, y + h * 0.5, 7, 0, TAU); c.arc(x + w * 0.7, y + h * 0.5, 7, 0, TAU); c.fill();
+}
+function roundTable(c, x, y, r) {
+  x *= T; y *= T; r *= T;
+  c.fillStyle = '#2c241d';
+  for (let i = 0; i < 4; i++) { const a = i * TAU / 4 + 0.4; c.beginPath(); c.arc(x + Math.cos(a) * (r + 12), y + Math.sin(a) * (r + 12), 10, 0, TAU); c.fill(); }
+  c.fillStyle = '#7a6049'; c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill();
+  c.strokeStyle = '#4a382b'; c.lineWidth = 3; c.stroke();
+}
+function sofa(c, x, y, w, h) {
+  x *= T; y *= T; w *= T; h *= T;
+  c.fillStyle = '#3e4a5c'; rr(c, x, y, w, h, 10); c.fill();
+  c.fillStyle = '#556479';
+  const n = Math.max(2, Math.round(w / 50));
+  for (let i = 0; i < n; i++) { rr(c, x + 10 + i * (w - 20) / n + 2, y + 8, (w - 20) / n - 4, h - 16, 6); c.fill(); }
+}
+function plant(c, x, y) {
+  x *= T; y *= T;
+  c.fillStyle = '#5b3d2a'; c.beginPath(); c.arc(x, y, 12, 0, TAU); c.fill();
+  for (let i = 0; i < 7; i++) {
+    const a = i * TAU / 7;
+    c.fillStyle = i % 2 ? '#3f7a45' : '#4f9152';
+    c.beginPath(); c.ellipse(x + Math.cos(a) * 9, y + Math.sin(a) * 9, 11, 5, a, 0, TAU); c.fill();
+  }
+}
+function rug(c, x, y, r) {
+  c.fillStyle = '#6a3d4c'; c.beginPath(); c.arc(x * T, y * T, r * T, 0, TAU); c.fill();
+  c.strokeStyle = '#8c5a69'; c.lineWidth = 4; c.beginPath(); c.arc(x * T, y * T, r * T - 10, 0, TAU); c.stroke();
+  c.beginPath(); c.arc(x * T, y * T, r * T - 24, 0, TAU); c.stroke();
+}
+function shelf(c, x, y, w, h) {
+  x *= T; y *= T; w *= T; h *= T;
+  c.fillStyle = '#3d2f24'; c.fillRect(x, y, w, h);
+  const cols = ['#8a3b3b', '#3b5f8a', '#c9a24a', '#4a7a4f', '#7a4a7a', '#d0d0d0'];
+  for (let px = x + 3; px < x + w - 6; px += 6 + srnd() * 3) { c.fillStyle = cols[Math.floor(srnd() * cols.length)]; c.fillRect(px, y + 3, 5, h - 6); }
+}
+function bathtub(c, x, y, w, h) {
+  x *= T; y *= T; w *= T; h *= T;
+  c.fillStyle = '#c7ccd3'; rr(c, x, y, w, h, 18); c.fill();
+  c.fillStyle = '#7f9fb8'; rr(c, x + 8, y + 8, w - 16, h - 16, 14); c.fill();
+  c.fillStyle = '#e6e9ee'; c.beginPath(); c.arc(x + w - 18, y + h / 2, 4, 0, TAU); c.fill();
+}
+function crate(c, x, y, s = 1) {
+  x *= T; y *= T; const w = s * T - 4;
+  c.fillStyle = '#7a5f3c'; c.fillRect(x + 2, y + 2, w, w);
+  c.strokeStyle = '#4d3b25'; c.lineWidth = 3; c.strokeRect(x + 3.5, y + 3.5, w - 3, w - 3);
+  c.beginPath(); c.moveTo(x + 4, y + 4); c.lineTo(x + w, y + w); c.moveTo(x + w, y + 4); c.lineTo(x + 4, y + w); c.stroke();
+}
+function barrel(c, x, y) {
+  c.fillStyle = '#4e5f52'; c.beginPath(); c.arc(x * T, y * T, 13, 0, TAU); c.fill();
+  c.strokeStyle = '#2f3a31'; c.lineWidth = 3; c.beginPath(); c.arc(x * T, y * T, 8, 0, TAU); c.stroke();
+}
+
+function drawHalf(c) {
+  const HW = W * T / 2;
+  c.save(); c.beginPath(); c.rect(0, 0, HW, H * T); c.clip();
+  c.fillStyle = '#3a404b'; c.fillRect(0, 0, HW, H * T);                     // betoon
+  for (let i = 0; i < 900; i++) {
+    c.fillStyle = srnd() < 0.5 ? 'rgba(0,0,0,.08)' : 'rgba(255,255,255,.04)';
+    c.fillRect(srnd() * HW, srnd() * H * T, 2 + srnd() * 5, 2 + srnd() * 5);
+  }
+  c.strokeStyle = 'rgba(0,0,0,.25)'; c.lineWidth = 2;
+  for (let x = 0; x <= HW; x += T * 4) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, H * T); c.stroke(); }
+  for (let y = 0; y <= H * T; y += T * 4) { c.beginPath(); c.moveTo(0, y); c.lineTo(HW, y); c.stroke(); }
+  woodFloor(c, 1, 1, 11, 10, '#5a4534');                     // magamistuba
+  tileFloor(c, 1, 25, 11, 10, '#5f6973', '#56606a');         // vannituba
+  carpet(c, 13, 1, 9, 8, '#4a3040', '#6a4558');               // söögituba
+  woodFloor(c, 13, 28, 9, 7, '#4d3d30');                     // elutuba
+  // mööbel
+  bed(c, 1.3, 1.3, 3.2, 4.2); crate(c, 4.7, 1.2, 0.9); rug(c, 7.5, 6.6, 2.2); plant(c, 10.5, 1.7);
+  shelf(c, 7.3, 1.1, 3.5, 0.6);
+  bathtub(c, 1.3, 31.6, 4.4, 2.2); roundTable(c, 8, 29.8, 1.2); plant(c, 10.5, 33.4); plant(c, 1.8, 26.1);
+  shelf(c, 13.2, 1.1, 7.5, 0.6); table(c, 14.8, 3.6, 4.4, 2); plant(c, 21, 7.6);
+  carpet(c, 14.4, 29.2, 4.4, 2.6, '#3c4a58', '#556b80'); sofa(c, 13.6, 32.8, 5.6, 1.6); plant(c, 21, 28.7);
+  c.fillStyle = '#16181c'; c.fillRect(14.8 * T, 28.15 * T, 3.6 * T, 8);    // telekas
+  crate(c, 10, 12.2); crate(c, 10.9, 12.2); crate(c, 10, 22.8); barrel(c, 2, 22.6); barrel(c, 2.9, 22.9);
+  crate(c, 20, 24.4); crate(c, 21, 24.4); crate(c, 20.5, 23.4); crate(c, 14, 12.4);
+  barrel(c, 25.6, 10.6); barrel(c, 26.5, 11.1); barrel(c, 25.6, 25.4);
+  c.restore();
+}
+
+const colorC = document.createElement('canvas'), greyC = document.createElement('canvas'), wallC = document.createElement('canvas');
+for (const c of [colorC, greyC, wallC]) { c.width = W * T; c.height = H * T; }
 (function prerender() {
-  const f = floorC.getContext('2d');
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    f.fillStyle = (x + y) % 2 ? '#1b202b' : '#1e2430';
-    f.fillRect(x * T, y * T, T, T);
-  }
-  f.strokeStyle = 'rgba(255,255,255,.035)';
-  for (let x = 0; x <= W; x++) { f.beginPath(); f.moveTo(x * T, 0); f.lineTo(x * T, H * T); f.stroke(); }
-  for (let y = 0; y <= H; y++) { f.beginPath(); f.moveTo(0, y * T); f.lineTo(W * T, y * T); f.stroke(); }
+  const c = colorC.getContext('2d');
+  drawHalf(c);
+  c.save(); c.translate(W * T, 0); c.scale(-1, 1); seed = 7; drawHalf(c); c.restore();
+  // väljaspool vaadet: hall ja tume
+  const g = greyC.getContext('2d');
+  if ('filter' in g) g.filter = 'grayscale(1) brightness(0.55)';
+  g.drawImage(colorC, 0, 0); g.filter = 'none';
+  g.fillStyle = 'rgba(8,10,14,.35)'; g.fillRect(0, 0, W * T, H * T);
+  // seinad: täiesti mustad
   const w = wallC.getContext('2d');
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (solid(x, y)) {
-    w.fillStyle = '#2b3242'; w.fillRect(x * T, y * T, T, T);
-    w.fillStyle = '#3a4357'; w.fillRect(x * T + 3, y * T + 3, T - 6, T - 9);
-    if (!solid(x, y + 1)) { w.fillStyle = '#20252f'; w.fillRect(x * T, y * T + T - 6, T, 6); }
-  }
+  w.fillStyle = '#000';
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (solid(x, y)) w.fillRect(x * T - 0.5, y * T - 0.5, T + 1, T + 1);
 })();
 
 // ---------- canvas ----------
 const cvs = document.getElementById('c'), ctx = cvs.getContext('2d');
-const fog = document.createElement('canvas'), fctx = fog.getContext('2d');
-let vw, vh, dpr, zoom;
+const maskC = document.createElement('canvas'), mctx = maskC.getContext('2d');
+const lightC = document.createElement('canvas'), lctx = lightC.getContext('2d');
+let vw, vh, dpr, zoom, camX = 0, camY = 0;
 function resize() {
   dpr = Math.min(2, window.devicePixelRatio || 1);
   vw = innerWidth; vh = innerHeight;
-  cvs.width = fog.width = Math.round(vw * dpr);
-  cvs.height = fog.height = Math.round(vh * dpr);
+  for (const c of [cvs, maskC, lightC]) { c.width = Math.round(vw * dpr); c.height = Math.round(vh * dpr); }
   cvs.style.width = vw + 'px'; cvs.style.height = vh + 'px';
-  zoom = clamp(Math.max(vw, vh) / 1250, 0.55, 1.1);
+  zoom = clamp(Math.max(vw, vh) / 1150, 0.6, 1.2);
 }
 addEventListener('resize', resize); resize();
 
@@ -165,20 +293,31 @@ const mouse = { x: 0, y: 0, down: false, used: false };
 let isTouch = false;
 addEventListener('keydown', e => {
   keys[e.code] = true;
-  if (e.code === 'KeyR' && player && player.alive) startReload(player);
+  if (state === 'play' && player && player.alive) {
+    if (e.code === 'KeyR') startReload(player);
+    if (e.code === 'KeyQ') useHeal(player);
+    if (e.code === 'KeyE') useShield(player);
+  }
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
 cvs.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; mouse.used = true; });
-cvs.addEventListener('mousedown', e => { if (e.button === 0) mouse.down = true; });
+cvs.addEventListener('mousedown', e => {
+  if (e.button !== 0) return;
+  const b = hitButton(e.clientX, e.clientY);
+  if (b) pressButton(b.id); else mouse.down = true;
+});
 addEventListener('mouseup', () => { mouse.down = false; });
 cvs.addEventListener('contextmenu', e => e.preventDefault());
 
 const STICK_R = 60;
 const sticks = { L: { id: null, ox: 0, oy: 0, x: 0, y: 0 }, R: { id: null, ox: 0, oy: 0, x: 0, y: 0 } };
+const btnTouches = new Set();
 cvs.addEventListener('touchstart', e => {
   e.preventDefault(); isTouch = true;
   for (const t of e.changedTouches) {
+    const b = hitButton(t.clientX, t.clientY);
+    if (b) { btnTouches.add(t.identifier); pressButton(b.id); continue; }
     const s = t.clientX < vw / 2 ? sticks.L : sticks.R;
     if (s.id !== null) continue;
     s.id = t.identifier; s.ox = t.clientX; s.oy = t.clientY; s.x = s.y = 0;
@@ -193,32 +332,58 @@ cvs.addEventListener('touchmove', e => {
   }
 }, { passive: false });
 const touchEnd = e => {
-  for (const t of e.changedTouches) for (const s of [sticks.L, sticks.R]) if (s.id === t.identifier) { s.id = null; s.x = s.y = 0; }
+  for (const t of e.changedTouches) {
+    btnTouches.delete(t.identifier);
+    for (const s of [sticks.L, sticks.R]) if (s.id === t.identifier) { s.id = null; s.x = s.y = 0; }
+  }
 };
 cvs.addEventListener('touchend', touchEnd); cvs.addEventListener('touchcancel', touchEnd);
 
+// HUD nupud (parem alanurk)
+function buttons() {
+  const s = clamp(Math.min(vw, vh) / 420, 0.75, 1.1);
+  return [
+    { id: 'reload', x: vw - 225 * s, y: vh - 62 * s, r: 32 * s },
+    { id: 'shield', x: vw - 140 * s, y: vh - 108 * s, r: 40 * s },
+    { id: 'heal',   x: vw - 70 * s,  y: vh - 200 * s, r: 40 * s },
+  ];
+}
+function hitButton(x, y) {
+  if (state !== 'play' || !player || !player.alive) return null;
+  return buttons().find(b => Math.hypot(x - b.x, y - b.y) < b.r + 6) || null;
+}
+function pressButton(id) {
+  if (id === 'reload') startReload(player);
+  if (id === 'heal') useHeal(player);
+  if (id === 'shield') useShield(player);
+}
+
 // ---------- mängu olek ----------
-let units = [], bullets = [], marks = [], meds = [], particles = [], feed = [], hitDirs = [];
-let player = null, state = 'menu', endT = 0, round = 0, shake = 0, flashRed = 0;
-const score = [0, 0];
+let units = [], bullets = [], marks = [], meds = [], particles = [], feed = [], hitDirs = [], dmgNums = [];
+let player = null, state = 'menu', endT = 0, round = 0, shake = 0, flashRed = 0, lastResult = false;
+let lockTarget = null;
+const score = [0, 0];   // võidud, kaotused
+let lastPlace = 1;
 let visibleEnemies = new Set();
-const NAMES = [['SINA', 'Alfa', 'Bravo'], ['Viper', 'Ghost', 'Rex']];
+const BOTS = 5;
+const NAMES = ['Viper', 'Ghost', 'Rex', 'Shade', 'Raven', 'Spike', 'Nova'];
 
 function makeUnit(team, tile, isPlayer, name) {
   return {
     team, isPlayer, name, x: tile.x * T + T / 2, y: tile.y * T + T / 2, r: 15,
-    angle: team === 0 ? 0 : Math.PI, hp: 100, maxHp: 100, ammo: MAG, reloadT: 0, fireCd: 0,
+    angle: team === 0 ? 0 : Math.PI, hp: MAX_HP, maxHp: MAX_HP, ammo: MAG, reloadT: 0, fireCd: 0,
     alive: true, firing: false, hurtT: 0, flashT: 0, stepAcc: 0, stepSide: 1,
-    ai: { path: [], pathT: 0, goal: null, goalKey: '', wander: null, target: null, react: 0,
+    heals: 1, shields: 1, shieldT: 0,
+    ai: { path: [], pathT: 0, goalKey: '', wander: null, target: null, react: 0,
           memory: null, memT: 0, investigate: null, alertAng: 0, alertT: 0, strafe: 1, strafeT: 0,
           aimErr: 0, aimT: 0, stuckT: 0, lastX: 0, lastY: 0, lookT: 0, lookAng: 0 },
   };
 }
 
-function pickSpawns(filter, n) {
+function pickSpawns(filter, n, gap = 3) {
   const out = [];
   for (const t of shuffle(OPEN.filter(filter))) {
-    if (out.every(o => Math.abs(o.x - t.x) + Math.abs(o.y - t.y) > 3)) out.push(t);
+    if (out.every(o => Math.abs(o.x - t.x) + Math.abs(o.y - t.y) > gap)) out.push(t);
     if (out.length === n) break;
   }
   return out;
@@ -226,30 +391,43 @@ function pickSpawns(filter, n) {
 
 function startRound() {
   round++;
-  units = []; bullets = []; marks = []; meds = []; particles = []; feed = []; hitDirs = [];
-  const a = pickSpawns(t => t.x <= 3, 3), b = pickSpawns(t => t.x >= W - 4, 3);
-  for (let i = 0; i < 3; i++) units.push(makeUnit(0, a[i], i === 0, NAMES[0][i]));
-  for (let i = 0; i < 3; i++) units.push(makeUnit(1, b[i], false, NAMES[1][i]));
+  units = []; bullets = []; marks = []; meds = []; particles = []; feed = []; hitDirs = []; dmgNums = [];
+  // igaüks on oma meeskonnas (solo); stardikohad üksteisest kaugel
+  let spots = [];
+  for (let gap = 22; spots.length < BOTS + 1; gap -= 3) spots = pickSpawns(() => true, BOTS + 1, gap);
+  const names = shuffle(NAMES.slice());
+  units.push(makeUnit(0, spots[0], true, 'SINA'));
+  for (let i = 1; i <= BOTS; i++) units.push(makeUnit(i, spots[i], false, names[i - 1]));
+  for (const u of units) u.angle = Math.atan2(H * T / 2 - u.y, W * T / 2 - u.x);
   player = units[0];
   state = 'play'; endT = 0; shake = 0; flashRed = 0;
-  addFeed(`Raund ${round} algas!`, '#ffcf4a');
 }
 
-function addFeed(text, color) { feed.unshift({ text, color, t: 5 }); if (feed.length > 6) feed.pop(); }
+function addFeed(text, color) { feed.unshift({ text, color, t: 5 }); if (feed.length > 5) feed.pop(); }
 
-// ---------- relv ----------
+// ---------- relv ja oskused ----------
 function startReload(u) { if (u.reloadT > 0 || u.ammo === MAG) return; u.reloadT = RELOAD; }
+function useHeal(u) {
+  if (u.heals <= 0 || u.hp >= u.maxHp) return;
+  u.heals--; u.hp = Math.min(u.maxHp, u.hp + HEAL);
+  spawnParticles(u.x, u.y, '#6be38a', 18);
+  if (visibleToUs(u)) dmgNums.push({ x: u.x, y: u.y - 20, text: '+' + HEAL, c: '#6be38a', t: 0.9 });
+}
+function useShield(u) {
+  if (u.shields <= 0 || u.shieldT > 0) return;
+  u.shields--; u.shieldT = SHIELD_TIME;
+}
+const visibleToUs = u => u.team === 0 || visibleEnemies.has(u);
 
 function tryFire(u) {
   if (u.reloadT > 0 || u.fireCd > 0) return false;
   if (u.ammo <= 0) { startReload(u); return false; }
   u.fireCd = FIRE_DELAY; u.ammo--; u.flashT = 0.05;
-  const a = u.angle + rand(-1, 1) * (u.isPlayer ? 0.045 : 0.08);
-  let sx = u.x + Math.cos(u.angle) * (u.r + 10), sy = u.y + Math.sin(u.angle) * (u.r + 10);
-  if (solidAt(sx, sy)) { sx = u.x; sy = u.y; }
-  bullets.push({ x: sx, y: sy, px: sx, py: sy, vx: Math.cos(a) * BULLET_SPEED, vy: Math.sin(a) * BULLET_SPEED, team: u.team, owner: u, life: 0.7 });
+  const a = u.angle + rand(-1, 1) * (u.isPlayer ? 0.04 : 0.075);
+  let sx = u.x + Math.cos(u.angle) * 30, sy = u.y + Math.sin(u.angle) * 30;
+  if (castRay(u.x, u.y, u.angle, 30) < 30) { sx = u.x; sy = u.y; }
+  bullets.push({ x: sx, y: sy, vx: Math.cos(a) * BULLET_SPEED, vy: Math.sin(a) * BULLET_SPEED, team: u.team, owner: u, life: 0.7 });
   marks.push({ type: 'shot', x: u.x, y: u.y, t: 0.7, team: u.team, src: u });
-  // vastased kuulevad lasku
   for (const b of units) {
     if (!b.alive || b.isPlayer || b.team === u.team || b.ai.target) continue;
     if (dist(b, u) < HEAR_SHOTS) b.ai.investigate = { x: u.x, y: u.y };
@@ -260,8 +438,10 @@ function tryFire(u) {
 }
 
 function damage(victim, shooter) {
-  victim.hp -= DMG; victim.hurtT = 0.12;
-  spawnParticles(victim.x, victim.y, '#ff4a5a', 5);
+  const dmg = Math.round(DMG * (victim.shieldT > 0 ? 0.4 : 1) * rand(0.9, 1.1));
+  victim.hp -= dmg; victim.hurtT = 0.1;
+  spawnParticles(victim.x, victim.y, victim.shieldT > 0 ? '#7fd8ff' : '#e0283a', 5);
+  if (visibleToUs(victim)) dmgNums.push({ x: victim.x + rand(-10, 10), y: victim.y - 22, text: String(dmg), c: victim.team === 0 ? '#ff6b6b' : '#ffffff', t: 0.7 });
   if (!victim.isPlayer) {
     if (!victim.ai.target) {
       victim.ai.alertAng = Math.atan2(shooter.y - victim.y, shooter.x - victim.x);
@@ -277,14 +457,14 @@ function damage(victim, shooter) {
 
 function kill(u, by) {
   u.alive = false; u.hp = 0;
-  spawnParticles(u.x, u.y, u.team === 0 ? '#4aa3ff' : '#ff4a5a', 22);
+  spawnParticles(u.x, u.y, '#e0283a', 26);
   meds.push({ x: u.x, y: u.y, t: 0 });
-  addFeed(`${by.name} ➜ ${u.name}`, by.team === 0 ? '#7cc1ff' : '#ff7a86');
+  addFeed(`${by.name}  ✕  ${u.name}`, by.isPlayer ? '#ffd54a' : u.isPlayer ? '#ff5a68' : 'rgba(255,255,255,.75)');
 }
 
 function spawnParticles(x, y, c, n) {
   for (let i = 0; i < n; i++) {
-    const a = rand(0, TAU), s = rand(40, 220);
+    const a = rand(0, TAU), s = rand(40, 240);
     particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, t: rand(0.25, 0.6), c });
   }
 }
@@ -315,7 +495,6 @@ function moveUnit(u, mx, my, dt) {
     const ma = Math.atan2(my, mx);
     marks.push({ type: 'step', x: u.x + Math.cos(ma + Math.PI / 2) * 5 * u.stepSide, y: u.y + Math.sin(ma + Math.PI / 2) * 5 * u.stepSide,
                  a: ma, t: 1.3, team: u.team, src: u });
-    // botid kuulevad lähedalt samme
     for (const b of units) {
       if (!b.alive || b.isPlayer || b.team === u.team || b.ai.target) continue;
       if (dist(b, u) < 300 && Math.random() < 0.35) b.ai.investigate = { x: u.x, y: u.y };
@@ -324,8 +503,7 @@ function moveUnit(u, mx, my, dt) {
 }
 
 function turnTo(u, target, rate, dt) {
-  const d = angDiff(target, u.angle);
-  u.angle += clamp(d, -rate * dt, rate * dt);
+  u.angle += clamp(angDiff(target, u.angle), -rate * dt, rate * dt);
 }
 
 // ---------- mängija ----------
@@ -337,7 +515,6 @@ function updatePlayer(u, dt) {
   if (keys.KeyD || keys.ArrowRight) mx += 1;
   mx += sticks.L.x; my += sticks.L.y;
 
-  // lähim vaenlane, keda mängija ise näeb
   let seen = null, best = Infinity;
   for (const e of units) if (e.alive && e.team !== u.team && sees(u, e)) {
     const d = dist(u, e); if (d < best) { best = d; seen = e; }
@@ -349,15 +526,13 @@ function updatePlayer(u, dt) {
     else if (seen) turnTo(u, Math.atan2(seen.y - u.y, seen.x - u.x), 8, dt);   // sihtimisabi
     else if (Math.hypot(mx, my) > 0.2) turnTo(u, Math.atan2(my, mx), 10, dt);
   } else if (mouse.used) {
-    const sx = vw / 2, sy = vh / 2;  // kaamera on mängija peal
-    u.angle = Math.atan2(mouse.y - sy, mouse.x - sx);
+    u.angle = Math.atan2(mouse.y - vh / 2, mouse.x - vw / 2);
   }
 
-  // automaatne tulistamine, kui vaenlane on sihikul
-  let auto = false;
-  if (seen) auto = Math.abs(angDiff(Math.atan2(seen.y - u.y, seen.x - u.x), u.angle)) < (isTouch ? 0.25 : 0.16);
+  lockTarget = null;
+  if (seen && Math.abs(angDiff(Math.atan2(seen.y - u.y, seen.x - u.x), u.angle)) < (isTouch ? 0.25 : 0.16)) lockTarget = seen;
   u.firing = false;
-  if (auto || mouse.down) { tryFire(u); u.firing = true; }
+  if (lockTarget || mouse.down) { tryFire(u); u.firing = true; }
   moveUnit(u, mx, my, dt);
 }
 
@@ -370,11 +545,13 @@ function updateBot(u, dt) {
   }
   if (target !== ai.target) { ai.target = target; if (target) ai.react = rand(0.2, 0.5); }
   ai.aimT -= dt; if (ai.aimT <= 0) { ai.aimT = 0.3; ai.aimErr = rand(-0.07, 0.07); }
+  if (u.hp < u.maxHp * 0.35) useHeal(u);
 
   let mx = 0, my = 0, face = null;
   u.firing = false;
 
   if (target) {
+    if (u.hp < u.maxHp * 0.7) useShield(u);
     ai.memory = { x: target.x, y: target.y }; ai.memT = 3.5; ai.investigate = null; ai.path = []; ai.alertT = 0;
     ai.react -= dt;
     const a = Math.atan2(target.y - u.y, target.x - u.x);
@@ -410,14 +587,12 @@ function updateBot(u, dt) {
 
     if (ai.alertT > 0) { ai.alertT -= dt; face = ai.alertAng; }
     else {
-      // vahel vaatab ringi
       ai.lookT -= dt;
       if (ai.lookT <= 0) { ai.lookT = rand(1.5, 3.5); ai.lookAng = rand(-0.9, 0.9); }
       face = ma + (ai.lookT < 0.6 ? ai.lookAng : 0);
     }
     if (u.ammo < MAG * 0.5) startReload(u);
 
-    // kinni jäämise kontroll
     ai.stuckT += dt;
     if (ai.stuckT > 1) {
       if (Math.hypot(u.x - ai.lastX, u.y - ai.lastY) < 20) { ai.path = []; ai.wander = null; ai.investigate = null; }
@@ -433,12 +608,11 @@ function update(dt) {
   if (state === 'menu') return;
   for (const u of units) {
     if (!u.alive) continue;
-    u.fireCd -= dt; u.hurtT -= dt; u.flashT -= dt;
+    u.fireCd -= dt; u.hurtT -= dt; u.flashT -= dt; u.shieldT = Math.max(0, u.shieldT - dt);
     if (u.reloadT > 0) { u.reloadT -= dt; if (u.reloadT <= 0) { u.reloadT = 0; u.ammo = MAG; } }
     if (state !== 'play') continue;
     if (u.isPlayer) updatePlayer(u, dt); else updateBot(u, dt);
   }
-  // üksused ei kattu
   for (let i = 0; i < units.length; i++) for (let j = i + 1; j < units.length; j++) {
     const a = units[i], b = units[j];
     if (!a.alive || !b.alive) continue;
@@ -449,13 +623,11 @@ function update(dt) {
       collide(a); collide(b);
     }
   }
-  // kuulid
   for (const b of bullets) {
-    b.px = b.x; b.py = b.y;
     const steps = 3;
     for (let s = 0; s < steps && b.life > 0; s++) {
       b.x += b.vx * dt / steps; b.y += b.vy * dt / steps;
-      if (solidAt(b.x, b.y)) { b.life = 0; spawnParticles(b.x, b.y, '#c8b98a', 3); break; }
+      if (solidAt(b.x, b.y)) { b.life = 0; spawnParticles(b.x, b.y, '#d8c89a', 3); break; }
       for (const u of units) {
         if (!u.alive || u.team === b.team) continue;
         if (Math.hypot(u.x - b.x, u.y - b.y) < u.r + 2) { b.life = 0; damage(u, b.owner); break; }
@@ -464,66 +636,56 @@ function update(dt) {
     b.life -= dt;
   }
   bullets = bullets.filter(b => b.life > 0);
-  // ravipakid
   for (const m of meds) {
     m.t += dt;
     for (const u of units) if (u.alive && u.hp < u.maxHp && Math.hypot(u.x - m.x, u.y - m.y) < u.r + 14) {
-      u.hp = Math.min(u.maxHp, u.hp + 40); m.taken = true;
-      if (u.isPlayer) addFeed('+40 elu', '#6be38a');
+      u.hp = Math.min(u.maxHp, u.hp + MEDKIT); m.taken = true;
+      if (visibleToUs(u)) dmgNums.push({ x: u.x, y: u.y - 20, text: '+' + MEDKIT, c: '#6be38a', t: 0.9 });
       break;
     }
   }
   meds = meds.filter(m => !m.taken);
-  for (const m of marks) m.t -= dt;
-  marks = marks.filter(m => m.t > 0);
-  for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.9; p.vy *= 0.9; p.t -= dt; }
-  particles = particles.filter(p => p.t > 0);
-  for (const f of feed) f.t -= dt;
-  feed = feed.filter(f => f.t > 0);
-  for (const h of hitDirs) h.t -= dt;
-  hitDirs = hitDirs.filter(h => h.t > 0);
+  const tick = arr => { for (const o of arr) o.t -= dt; return arr.filter(o => o.t > 0); };
+  marks = tick(marks); feed = tick(feed); hitDirs = tick(hitDirs);
+  for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.9; p.vy *= 0.9; }
+  particles = tick(particles);
+  for (const n of dmgNums) n.y -= 40 * dt;
+  dmgNums = tick(dmgNums);
   shake *= Math.pow(0.001, dt); flashRed = Math.max(0, flashRed - dt);
 
-  // mida meie meeskond näeb
   visibleEnemies = new Set();
-  for (const e of units) if (e.alive && e.team === 1)
-    for (const a of units) if (a.alive && a.team === 0 && sees(a, e)) { visibleEnemies.add(e); break; }
+  for (const e of units) if (e.alive && e.team !== 0 && player.alive && sees(player, e)) visibleEnemies.add(e);
 
-  // raundi lõpp
   if (state === 'play') {
-    const alive0 = units.some(u => u.alive && u.team === 0), alive1 = units.some(u => u.alive && u.team === 1);
-    if (!alive0 || !alive1) {
-      state = 'end'; endT = 1.6;
-      const won = alive0;
-      score[won ? 0 : 1]++;
-      lastResult = won;
+    const others = units.filter(u => u.alive && !u.isPlayer).length;
+    if (!player.alive || others === 0) {
+      state = 'end'; endT = player.alive ? 1.6 : 2.2;
+      lastResult = player.alive;
+      lastPlace = player.alive ? 1 : others + 1;
+      score[lastResult ? 0 : 1]++;
     }
   } else if (state === 'end') {
     endT -= dt;
     if (endT <= 0 && overlay.classList.contains('hidden')) showEnd();
   }
 }
-let lastResult = false;
 
-function camUnit() {
-  if (player && player.alive) return player;
-  return units.find(u => u.alive && u.team === 0) || player;
-}
+function camUnit() { return player; }
 
 // ---------- joonistamine ----------
 function visPoly(u) {
-  const pts = [], N1 = 72, N2 = 36;
+  const pts = [], hits = [], N1 = 80, N2 = 36;
   const s = u.angle - CONE, e = u.angle + CONE;
   for (let i = 0; i <= N1; i++) {
     const a = s + (e - s) * i / N1, d = castRay(u.x, u.y, a, VIEW);
-    pts.push(u.x + Math.cos(a) * d, u.y + Math.sin(a) * d);
+    pts.push(u.x + Math.cos(a) * d, u.y + Math.sin(a) * d); hits.push(d < VIEW ? d : 0);
   }
   const rest = TAU - 2 * CONE;
   for (let i = 1; i < N2; i++) {
     const a = e + rest * i / N2, d = castRay(u.x, u.y, a, NEAR);
     pts.push(u.x + Math.cos(a) * d, u.y + Math.sin(a) * d);
   }
-  return pts;
+  return { pts, hits, n: N1 };
 }
 function polyPath(c, pts) {
   c.beginPath(); c.moveTo(pts[0], pts[1]);
@@ -531,189 +693,341 @@ function polyPath(c, pts) {
   c.closePath();
 }
 
-function drawUnit(u, color, dark) {
+const LOOKS = {
+  player: { jacket: '#6f7d3a', dark: '#2e3418', hair: '#e9c64e', glow: 'rgba(255,40,50,' },
+  enemy:  { jacket: '#c4303d', dark: '#4a1018', hair: '#1e1214', glow: null },
+};
+
+function drawUnit(u, L) {
+  const hurt = u.hurtT > 0;
   ctx.save(); ctx.translate(u.x, u.y);
-  ctx.fillStyle = 'rgba(0,0,0,.45)';
-  ctx.beginPath(); ctx.ellipse(3, 5, u.r, u.r * 0.85, 0, 0, TAU); ctx.fill();
-  ctx.rotate(u.angle);
-  ctx.fillStyle = '#15171c'; ctx.fillRect(2, -3.5, u.r + 13, 7);
-  if (u.flashT > 0) {
-    ctx.fillStyle = '#ffe9a0';
-    ctx.beginPath(); ctx.moveTo(u.r + 14, -6); ctx.lineTo(u.r + 30, 0); ctx.lineTo(u.r + 14, 6); ctx.fill();
+  if (L.glow) {
+    const g = ctx.createRadialGradient(0, 0, 4, 0, 0, 34);
+    g.addColorStop(0, L.glow + '.55)'); g.addColorStop(1, L.glow + '0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, 34, 0, TAU); ctx.fill();
   }
-  ctx.fillStyle = dark; ctx.beginPath(); ctx.arc(-6, 0, u.r * 0.7, 0, TAU); ctx.fill();   // seljakott
-  ctx.fillStyle = u.hurtT > 0 ? '#fff' : color;
-  ctx.beginPath(); ctx.arc(0, 0, u.r, 0, TAU); ctx.fill();
-  ctx.lineWidth = 3; ctx.strokeStyle = dark; ctx.stroke();
-  ctx.fillStyle = dark; ctx.beginPath(); ctx.arc(4, 0, 5, 0, TAU); ctx.fill();           // pea
+  ctx.fillStyle = 'rgba(0,0,0,.45)';
+  ctx.beginPath(); ctx.ellipse(4, 6, 15, 17, u.angle, 0, TAU); ctx.fill();
+  ctx.rotate(u.angle);
+  // relv
+  ctx.fillStyle = '#121316'; ctx.fillRect(4, -2.5, 28, 5);
+  ctx.fillStyle = '#34373f'; ctx.fillRect(2, -3.5, 13, 7); ctx.fillRect(16, -1, 4, 6);
+  if (u.flashT > 0) {
+    ctx.fillStyle = '#fff3c4';
+    ctx.beginPath(); ctx.moveTo(32, -6); ctx.lineTo(48, 0); ctx.lineTo(32, 6); ctx.fill();
+  }
+  // käed
+  ctx.lineCap = 'round'; ctx.lineWidth = 6; ctx.strokeStyle = hurt ? '#fff' : L.jacket;
+  ctx.beginPath(); ctx.moveTo(-2, -11); ctx.lineTo(14, -3); ctx.moveTo(-2, 11); ctx.lineTo(8, 3); ctx.stroke();
+  ctx.fillStyle = '#d9a982';
+  ctx.beginPath(); ctx.arc(15, -2, 3, 0, TAU); ctx.arc(9, 2.5, 3, 0, TAU); ctx.fill();
+  // seljakott
+  ctx.fillStyle = L.dark; rr(ctx, -15, -8, 8, 16, 3); ctx.fill();
+  // keha (õlad)
+  ctx.fillStyle = hurt ? '#fff' : L.jacket;
+  ctx.beginPath(); ctx.ellipse(-3, 0, 8.5, 14, 0, 0, TAU); ctx.fill();
+  ctx.lineWidth = 2; ctx.strokeStyle = L.dark; ctx.stroke();
+  // pea
+  ctx.fillStyle = L.hair; ctx.beginPath(); ctx.arc(-1, 0, 7, 0, TAU); ctx.fill(); ctx.stroke();
   ctx.restore();
-  // elu riba
-  const w = 36, hpw = w * u.hp / u.maxHp;
-  ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(u.x - w / 2 - 1, u.y - u.r - 15, w + 2, 6);
-  ctx.fillStyle = u.team === 0 ? (u.isPlayer ? '#6be38a' : '#4aa3ff') : '#ff4a5a';
-  ctx.fillRect(u.x - w / 2, u.y - u.r - 14, hpw, 4);
-  ctx.font = '600 11px system-ui,sans-serif'; ctx.textAlign = 'center';
-  ctx.fillStyle = 'rgba(255,255,255,.75)'; ctx.fillText(u.name, u.x, u.y - u.r - 19);
+  if (u.shieldT > 0) {
+    ctx.strokeStyle = `rgba(120,210,255,${0.4 + 0.3 * Math.sin(performance.now() / 80)})`; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(u.x, u.y, 26, 0, TAU); ctx.stroke();
+  }
+  // elu riba karakteri all
+  const w = 44, y = u.y + 26;
+  ctx.fillStyle = 'rgba(0,0,0,.7)'; ctx.fillRect(u.x - w / 2 - 1, y - 1, w + 2, 6);
+  ctx.fillStyle = u.isPlayer ? '#54d66a' : '#e8283a';
+  ctx.fillRect(u.x - w / 2, y, w * u.hp / u.maxHp, 4);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  if (u.isPlayer) { ctx.font = `700 12px ${FONT}`; ctx.fillStyle = '#fff'; ctx.fillText(Math.ceil(u.hp), u.x, y - 3); }
+  else { ctx.font = `500 11px ${FONT}`; ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.fillText(u.name, u.x, u.y - 24); }
 }
 
-function render(now) {
+function drawLaser(u) {
+  const tipX = u.x + Math.cos(u.angle) * 32, tipY = u.y + Math.sin(u.angle) * 32;
+  const d = castRay(u.x, u.y, u.angle, VIEW) - 32;
+  if (d <= 0) return;
+  const ex = tipX + Math.cos(u.angle) * d, ey = tipY + Math.sin(u.angle) * d;
+  const g = ctx.createLinearGradient(tipX, tipY, ex, ey);
+  g.addColorStop(0, 'rgba(255,30,40,.75)'); g.addColorStop(1, 'rgba(255,30,40,.08)');
+  ctx.strokeStyle = g; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(tipX, tipY); ctx.lineTo(ex, ey); ctx.stroke();
+  if (d + 32 < VIEW) { ctx.fillStyle = 'rgba(255,60,60,.9)'; ctx.beginPath(); ctx.arc(ex, ey, 2.5, 0, TAU); ctx.fill(); }
+}
+
+function drawCrosshair(x, y, color) {
+  ctx.strokeStyle = color; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(x, y, 10, 0, TAU); ctx.stroke();
+  ctx.beginPath();
+  for (const [a, b] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { ctx.moveTo(x + a * 6, y + b * 6); ctx.lineTo(x + a * 15, y + b * 15); }
+  ctx.stroke();
+}
+
+function render() {
   const cam = camUnit();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = '#07090d'; ctx.fillRect(0, 0, cvs.width, cvs.height);
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, cvs.width, cvs.height);
   if (!cam) return;
-  const ox = vw / 2 - cam.x * zoom + rand(-1, 1) * shake, oy = vh / 2 - cam.y * zoom + rand(-1, 1) * shake;
-  const world = c => c.setTransform(dpr * zoom, 0, 0, dpr * zoom, ox * dpr, oy * dpr);
+  camX = vw / 2 - cam.x * zoom + rand(-1, 1) * shake;
+  camY = vh / 2 - cam.y * zoom + rand(-1, 1) * shake;
+  const world = c => c.setTransform(dpr * zoom, 0, 0, dpr * zoom, camX * dpr, camY * dpr);
 
+  // 1) hall, tume põrand
+  world(ctx); ctx.drawImage(greyC, 0, 0);
+
+  // 2) valguse mask: kõigi liitlaste taskulambid
+  mctx.setTransform(1, 0, 0, 1, 0, 0); mctx.clearRect(0, 0, maskC.width, maskC.height);
+  world(mctx);
+  let camVis = null;
+  for (const a of units) {
+    if (!a.alive || a.team !== 0) continue;
+    const v = visPoly(a); if (a === cam) camVis = v;
+    const k = a === cam ? 1 : 0.6;
+    const g = mctx.createRadialGradient(a.x, a.y, 0, a.x, a.y, VIEW);
+    g.addColorStop(0, `rgba(255,255,255,${k})`); g.addColorStop(0.7, `rgba(255,255,255,${0.85 * k})`); g.addColorStop(1, 'rgba(255,255,255,0)');
+    mctx.fillStyle = g; polyPath(mctx, v.pts); mctx.fill();
+  }
+  // 3) värviline põrand ainult valguses
+  lctx.globalCompositeOperation = 'source-over';
+  lctx.setTransform(1, 0, 0, 1, 0, 0); lctx.clearRect(0, 0, lightC.width, lightC.height);
+  world(lctx); lctx.drawImage(colorC, 0, 0);
+  lctx.setTransform(1, 0, 0, 1, 0, 0);
+  lctx.globalCompositeOperation = 'destination-in'; lctx.drawImage(maskC, 0, 0);
+  lctx.globalCompositeOperation = 'source-over';
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(lightC, 0, 0);
   world(ctx);
-  ctx.drawImage(floorC, 0, 0);
-  // ravipakid
+
+  // 4) taskulambi kiir (soe kuma + hele tuum)
+  if (camVis) {
+    ctx.save(); polyPath(ctx, camVis.pts); ctx.clip();
+    ctx.globalCompositeOperation = 'lighter';
+    let g = ctx.createRadialGradient(cam.x, cam.y, 0, cam.x, cam.y, VIEW);
+    g.addColorStop(0, 'rgba(255,238,190,.42)'); g.addColorStop(0.35, 'rgba(255,228,170,.2)'); g.addColorStop(1, 'rgba(255,220,160,0)');
+    ctx.fillStyle = g; ctx.fillRect(cam.x - VIEW, cam.y - VIEW, VIEW * 2, VIEW * 2);
+    g = ctx.createRadialGradient(cam.x, cam.y, 0, cam.x, cam.y, VIEW * 0.85);
+    g.addColorStop(0, 'rgba(255,255,245,.5)'); g.addColorStop(1, 'rgba(255,255,245,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(cam.x, cam.y);
+    ctx.arc(cam.x, cam.y, VIEW, cam.angle - CONE * 0.35, cam.angle + CONE * 0.35); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  // 5) asjad põrandal
   for (const m of meds) {
     const p = 1 + Math.sin(m.t * 5) * 0.08;
     ctx.save(); ctx.translate(m.x, m.y); ctx.scale(p, p);
-    ctx.fillStyle = '#e8f6ec'; ctx.fillRect(-10, -10, 20, 20);
-    ctx.fillStyle = '#2bbf5a'; ctx.fillRect(-3, -7, 6, 14); ctx.fillRect(-7, -3, 14, 6);
+    ctx.fillStyle = 'rgba(80,255,120,.18)'; ctx.beginPath(); ctx.arc(0, 0, 20, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#f2f5f2'; rr(ctx, -10, -10, 20, 20, 4); ctx.fill();
+    ctx.fillStyle = '#25b553'; ctx.fillRect(-3, -7, 6, 14); ctx.fillRect(-7, -3, 14, 6);
     ctx.restore();
   }
-  // kuulid
-  ctx.lineCap = 'round';
-  for (const b of bullets) {
-    ctx.strokeStyle = b.team === 0 ? 'rgba(255,230,140,.95)' : 'rgba(255,140,120,.95)';
-    ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(b.x - b.vx * 0.018, b.y - b.vy * 0.018); ctx.lineTo(b.x, b.y); ctx.stroke();
-  }
-  for (const p of particles) { ctx.globalAlpha = clamp(p.t * 2, 0, 1); ctx.fillStyle = p.c; ctx.fillRect(p.x - 2, p.y - 2, 4, 4); }
-  ctx.globalAlpha = 1;
-
-  // pimedus + nähtavad alad (kogu meeskonna taskulambid)
-  fctx.setTransform(1, 0, 0, 1, 0, 0);
-  fctx.globalCompositeOperation = 'source-over';
-  fctx.clearRect(0, 0, fog.width, fog.height);
-  fctx.fillStyle = 'rgba(3,5,9,0.9)'; fctx.fillRect(0, 0, fog.width, fog.height);
-  fctx.globalCompositeOperation = 'destination-out';
-  world(fctx);
-  const camPoly = cam.alive ? visPoly(cam) : null;
-  for (const a of units) {
-    if (!a.alive || a.team !== 0) continue;
-    const pts = a === cam ? camPoly : visPoly(a);
-    const g = fctx.createRadialGradient(a.x, a.y, 0, a.x, a.y, VIEW);
-    const k = a === cam ? 1 : 0.75;
-    g.addColorStop(0, `rgba(0,0,0,${k})`); g.addColorStop(0.65, `rgba(0,0,0,${0.9 * k})`); g.addColorStop(1, 'rgba(0,0,0,0)');
-    fctx.fillStyle = g; polyPath(fctx, pts); fctx.fill();
-  }
-  fctx.globalCompositeOperation = 'source-over';
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.drawImage(fog, 0, 0);
-  world(ctx);
-
-  // soe taskulambi kuma
-  if (camPoly) {
-    ctx.globalCompositeOperation = 'lighter';
-    const g = ctx.createRadialGradient(cam.x, cam.y, 0, cam.x, cam.y, VIEW);
-    g.addColorStop(0, 'rgba(255,225,160,.13)'); g.addColorStop(1, 'rgba(255,225,160,0)');
-    ctx.fillStyle = g; polyPath(ctx, camPoly); ctx.fill();
-    ctx.globalCompositeOperation = 'source-over';
-  }
-
-  ctx.drawImage(wallC, 0, 0);
-
-  // vaenlaste helijäljed (sammud, lasud)
-  for (const m of marks) {
+  for (const m of marks) {                              // vaenlase helijäljed
     if (m.team === 0 || visibleEnemies.has(m.src)) continue;
     const d = Math.hypot(m.x - cam.x, m.y - cam.y);
     if (m.type === 'step') {
       if (d > HEAR_STEPS) continue;
-      ctx.globalAlpha = clamp(m.t / 1.3, 0, 1) * 0.85;
-      ctx.fillStyle = '#ff3b4e';
+      ctx.globalAlpha = clamp(m.t / 1.3, 0, 1) * 0.9;
+      ctx.fillStyle = '#ff2236';
       ctx.save(); ctx.translate(m.x, m.y); ctx.rotate(m.a);
-      ctx.beginPath(); ctx.ellipse(0, 0, 6, 3.5, 0, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(0, 0, 6.5, 3.5, 0, 0, TAU); ctx.fill();
       ctx.restore();
     } else {
       if (d > HEAR_SHOTS) continue;
       const k = 1 - m.t / 0.7;
       ctx.globalAlpha = (1 - k) * 0.9;
-      ctx.strokeStyle = '#ff3b4e'; ctx.lineWidth = 3;
+      ctx.strokeStyle = '#ff2236'; ctx.lineWidth = 3;
       ctx.beginPath(); ctx.arc(m.x, m.y, 10 + k * 40, 0, TAU); ctx.stroke();
     }
   }
   ctx.globalAlpha = 1;
+  ctx.lineCap = 'round';
+  for (const b of bullets) {
+    ctx.strokeStyle = b.team === 0 ? 'rgba(255,240,170,.95)' : 'rgba(255,120,110,.95)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.moveTo(b.x - b.vx * 0.02, b.y - b.vy * 0.02); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+  for (const p of particles) { ctx.globalAlpha = clamp(p.t * 2, 0, 1); ctx.fillStyle = p.c; ctx.fillRect(p.x - 2, p.y - 2, 4, 4); }
+  ctx.globalAlpha = 1;
 
-  // üksused
+  // 6) mustad seinad + valgustatud servad
+  ctx.drawImage(wallC, 0, 0);
+  if (camVis) {
+    ctx.lineWidth = 3; ctx.lineCap = 'butt';
+    const { pts, hits, n } = camVis;
+    for (let i = 0; i < n; i++) {
+      if (!hits[i] || !hits[i + 1]) continue;
+      const x1 = pts[i * 2], y1 = pts[i * 2 + 1], x2 = pts[i * 2 + 2], y2 = pts[i * 2 + 3];
+      if (Math.hypot(x2 - x1, y2 - y1) > 26) continue;
+      const a = 1 - (hits[i] + hits[i + 1]) / 2 / VIEW;
+      ctx.strokeStyle = `rgba(255,246,220,${clamp(a * 1.2, 0, 1)})`;
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    }
+  }
+
+  // 7) laserid ja karakterid
+  if (player.alive) drawLaser(player);
+  for (const u of units) if (u.alive && visibleEnemies.has(u)) drawLaser(u);
   for (const u of units) {
     if (!u.alive) continue;
-    if (u.team === 0) drawUnit(u, u.isPlayer ? '#ffcf4a' : '#4aa3ff', u.isPlayer ? '#6b5212' : '#163a63');
-    else if (visibleEnemies.has(u)) drawUnit(u, '#ff4a5a', '#5e1820');
+    if (u.isPlayer) drawUnit(u, LOOKS.player);
+    else if (visibleEnemies.has(u)) drawUnit(u, LOOKS.enemy);
   }
-  // tabamuse suunad
   if (player.alive) for (const h of hitDirs) {
-    ctx.strokeStyle = `rgba(255,60,70,${h.t})`; ctx.lineWidth = 5;
-    ctx.beginPath(); ctx.arc(player.x, player.y, 40, h.a - 0.35, h.a + 0.35); ctx.stroke();
+    ctx.strokeStyle = `rgba(255,40,50,${h.t})`; ctx.lineWidth = 5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(player.x, player.y, 44, h.a - 0.35, h.a + 0.35); ctx.stroke();
+  }
+  ctx.textAlign = 'center';
+  for (const n of dmgNums) {
+    ctx.globalAlpha = clamp(n.t * 2, 0, 1);
+    ctx.font = `italic 700 18px ${FONT}`; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.8)';
+    ctx.strokeText(n.text, n.x, n.y); ctx.fillStyle = n.c; ctx.fillText(n.text, n.x, n.y);
+  }
+  ctx.globalAlpha = 1;
+  // sihik
+  if (player.alive) {
+    if (lockTarget) drawCrosshair(lockTarget.x, lockTarget.y, 'rgba(255,70,80,.95)');
+    else if (!isTouch && mouse.used) drawCrosshair((mouse.x - camX) / zoom, (mouse.y - camY) / zoom, 'rgba(200,230,255,.85)');
   }
 
-  drawHUD(cam);
+  drawHUD();
 }
 
-function drawHUD(cam) {
+// ---------- HUD ----------
+function plus(c, x, y, s, t) { c.fillRect(x - t / 2, y - s / 2, t, s); c.fillRect(x - s / 2, y - t / 2, s, t); }
+function bolt(c, x, y, k) {
+  c.beginPath(); c.moveTo(x + 3 * k, y); c.lineTo(x - 3 * k, y + 8 * k); c.lineTo(x, y + 8 * k);
+  c.lineTo(x - 2 * k, y + 15 * k); c.lineTo(x + 5 * k, y + 6 * k); c.lineTo(x + 2 * k, y + 6 * k); c.lineTo(x + 5 * k, y); c.closePath(); c.fill();
+}
+function drawButton(b, p) {
+  const k = b.r / 40;
+  let charges = null, enabled = true, key = '';
+  if (b.id === 'heal') { charges = p.heals; enabled = p.heals > 0; key = 'Q'; }
+  if (b.id === 'shield') { charges = p.shields; enabled = p.shields > 0 || p.shieldT > 0; key = 'E'; }
+  if (b.id === 'reload') { enabled = p.reloadT <= 0 && p.ammo < MAG; key = 'R'; }
+  ctx.save(); ctx.translate(b.x, b.y);
+  ctx.globalAlpha = enabled ? 1 : 0.35;
+  ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.arc(0, 0, b.r, 0, TAU); ctx.fill();
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 3 * k; ctx.stroke();
+  ctx.fillStyle = '#fff'; ctx.strokeStyle = '#fff';
+  if (b.id === 'heal') { plus(ctx, -3 * k, 5 * k, 26 * k, 9 * k); plus(ctx, 12 * k, -11 * k, 12 * k, 4 * k); plus(ctx, 15 * k, 9 * k, 9 * k, 3 * k); }
+  if (b.id === 'shield') {
+    ctx.lineWidth = 3 * k;
+    ctx.beginPath(); ctx.moveTo(0, -16 * k); ctx.lineTo(14 * k, -11 * k); ctx.lineTo(13 * k, 3 * k);
+    ctx.quadraticCurveTo(10 * k, 13 * k, 0, 18 * k); ctx.quadraticCurveTo(-10 * k, 13 * k, -13 * k, 3 * k);
+    ctx.lineTo(-14 * k, -11 * k); ctx.closePath(); ctx.stroke();
+    ctx.beginPath();
+    for (let i = -1; i <= 1; i++) { ctx.moveTo((-6 + i * 6) * k, 8 * k); ctx.lineTo((4 + i * 6) * k, -6 * k); }
+    ctx.stroke();
+    if (p.shieldT > 0) {
+      ctx.strokeStyle = '#7fd8ff'; ctx.lineWidth = 4 * k;
+      ctx.beginPath(); ctx.arc(0, 0, b.r - 2 * k, -Math.PI / 2, -Math.PI / 2 + TAU * p.shieldT / SHIELD_TIME); ctx.stroke();
+    }
+  }
+  if (b.id === 'reload') {
+    for (let i = -1; i <= 1; i++) {
+      const x = i * 8 * k + (i === 0 ? 0 : 0), y = (i === 0 ? -3 : 1) * k;
+      ctx.beginPath(); ctx.moveTo(x - 3 * k, y + 10 * k); ctx.lineTo(x - 3 * k, y - 4 * k);
+      ctx.quadraticCurveTo(x, y - 12 * k, x + 3 * k, y - 4 * k); ctx.lineTo(x + 3 * k, y + 10 * k); ctx.closePath(); ctx.fill();
+    }
+    ctx.lineWidth = 2.5 * k;
+    ctx.beginPath(); ctx.arc(0, 0, 21 * k, 0.6, 2.5); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, 21 * k, 3.7, 5.6); ctx.stroke();
+    if (p.reloadT > 0) {
+      ctx.globalAlpha = 1; ctx.strokeStyle = '#ffcf4a'; ctx.lineWidth = 4 * k;
+      ctx.beginPath(); ctx.arc(0, 0, b.r - 2 * k, -Math.PI / 2, -Math.PI / 2 + TAU * (1 - p.reloadT / RELOAD)); ctx.stroke();
+    }
+  }
+  if (charges !== null) {
+    ctx.fillStyle = '#fff'; bolt(ctx, -b.r * 0.55, -b.r * 1.25, k);
+    ctx.font = `700 ${16 * k}px ${FONT}`; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText(charges, -b.r * 0.55 + 7 * k, -b.r * 1.27);
+  }
+  if (!isTouch) {
+    ctx.globalAlpha = 0.6; ctx.font = `500 ${12 * k}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.fillText(key, 0, b.r + 4);
+  }
+  ctx.restore();
+}
+
+function drawRifle(x, y, s) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s); ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.moveTo(0, 6); ctx.lineTo(30, 4); ctx.lineTo(30, 18); ctx.lineTo(4, 24); ctx.lineTo(0, 22); ctx.closePath(); ctx.fill();
+  ctx.fillRect(28, 3, 72, 15);
+  ctx.fillRect(98, 7, 52, 6); ctx.fillRect(146, 4, 6, 12);
+  ctx.fillRect(46, -4, 32, 6); ctx.fillRect(52, -7, 4, 4); ctx.fillRect(70, -7, 4, 4);
+  ctx.beginPath(); ctx.moveTo(56, 18); ctx.lineTo(68, 18); ctx.lineTo(72, 38); ctx.lineTo(60, 38); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(36, 18); ctx.lineTo(45, 18); ctx.lineTo(42, 32); ctx.lineTo(34, 32); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#000'; ctx.fillRect(84, 7, 10, 3); ctx.fillRect(84, 12, 10, 2);
+  ctx.restore();
+}
+
+function drawHUD() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  // punane vinjett
+  // vinjett
+  let g = ctx.createRadialGradient(vw / 2, vh / 2, Math.min(vw, vh) * 0.35, vw / 2, vh / 2, Math.max(vw, vh) * 0.75);
+  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.55)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, vw, vh);
   const low = player.alive ? 1 - player.hp / player.maxHp : 0;
   const vig = Math.max(flashRed, low > 0.6 ? (low - 0.6) * 1.2 : 0);
   if (vig > 0) {
-    const g = ctx.createRadialGradient(vw / 2, vh / 2, Math.min(vw, vh) * 0.3, vw / 2, vh / 2, Math.max(vw, vh) * 0.7);
+    g = ctx.createRadialGradient(vw / 2, vh / 2, Math.min(vw, vh) * 0.3, vw / 2, vh / 2, Math.max(vw, vh) * 0.7);
     g.addColorStop(0, 'rgba(255,0,0,0)'); g.addColorStop(1, `rgba(200,0,20,${Math.min(0.55, vig)})`);
     ctx.fillStyle = g; ctx.fillRect(0, 0, vw, vh);
   }
   ctx.textBaseline = 'middle';
-  // ülemine riba: meeskonnad
-  const cx = vw / 2;
-  for (let team = 0; team < 2; team++) {
-    const list = units.filter(u => u.team === team);
-    list.forEach((u, i) => {
-      const x = team === 0 ? cx - 40 - i * 24 : cx + 40 + i * 24;
-      ctx.beginPath(); ctx.arc(x, 24, 9, 0, TAU);
-      ctx.fillStyle = u.alive ? (team === 0 ? (u.isPlayer ? '#ffcf4a' : '#4aa3ff') : '#ff4a5a') : 'rgba(255,255,255,.12)';
-      ctx.fill();
-    });
-  }
-  ctx.font = '800 18px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
-  ctx.fillText(`${score[0]} : ${score[1]}`, cx, 24);
-  ctx.font = '600 12px system-ui,sans-serif'; ctx.fillStyle = 'rgba(255,255,255,.55)';
-  ctx.fillText(`RAUND ${round}`, cx, 46);
+  // vastaseid järel
+  const cx = vw / 2, left = units.filter(u => u.alive && !u.isPlayer).length;
+  ctx.font = `italic 700 24px ${FONT}`; ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
+  ctx.fillText(`${left} VASTAST`, cx, 26);
+  ctx.font = `500 12px ${FONT}`; ctx.fillStyle = 'rgba(255,255,255,.5)';
+  ctx.fillText(`RAUND ${round} · VÕITE ${score[0]}`, cx, 50);
+
+  // relva ikoon
+  const rs = clamp(vw / 1400, 0.55, 0.9);
+  drawRifle(vw - 160 * rs - 20, 22, rs);
 
   // tapmiste voog
-  ctx.textAlign = 'right'; ctx.font = '600 13px system-ui,sans-serif';
+  ctx.textAlign = 'right'; ctx.font = `500 15px ${FONT}`;
   feed.forEach((f, i) => {
     ctx.globalAlpha = clamp(f.t, 0, 1);
-    ctx.fillStyle = 'rgba(0,0,0,.45)';
-    const tw = ctx.measureText(f.text).width;
-    ctx.fillRect(vw - 16 - tw - 10, 14 + i * 24, tw + 16, 20);
-    ctx.fillStyle = f.color; ctx.fillText(f.text, vw - 18, 24 + i * 24);
+    ctx.fillStyle = f.color; ctx.fillText(f.text, vw - 20, 80 + i * 22);
   });
   ctx.globalAlpha = 1;
 
-  // elu ja laskemoon
-  const p = player, bx = 16, by = vh - 52, bw = Math.min(240, vw * 0.4);
+  const p = player;
   if (p.alive) {
-    ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(bx, by, bw, 18);
-    ctx.fillStyle = p.hp > 35 ? '#6be38a' : '#ff4a5a'; ctx.fillRect(bx + 2, by + 2, (bw - 4) * p.hp / p.maxHp, 14);
-    ctx.textAlign = 'left'; ctx.font = '700 12px system-ui,sans-serif'; ctx.fillStyle = '#0b0d12';
-    ctx.fillText(`${Math.ceil(p.hp)} HP`, bx + 8, by + 10);
-    ctx.font = '800 22px system-ui,sans-serif'; ctx.fillStyle = '#fff';
-    if (p.reloadT > 0) {
-      ctx.fillStyle = '#ffcf4a'; ctx.fillText('LAEN…', bx, by + 36);
-      ctx.fillStyle = 'rgba(255,207,74,.35)'; ctx.fillRect(bx + 80, by + 32, 80 * (1 - p.reloadT / RELOAD), 6);
-    } else ctx.fillText(`${p.ammo} / ${MAG}`, bx, by + 36);
-  } else if (state === 'play') {
-    ctx.textAlign = 'center'; ctx.font = '800 22px system-ui,sans-serif'; ctx.fillStyle = '#ff7a86';
-    ctx.fillText('Said surma — vaatad liitlast', vw / 2, vh - 60);
+    const bs = buttons();
+    for (const b of bs) drawButton(b, p);
+    // laskemoon
+    const rb = bs[0];
+    ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
+    ctx.font = `italic 700 ${rb.r * 1.1}px ${FONT}`; ctx.fillStyle = p.ammo <= 5 ? '#ff5a68' : '#fff';
+    const small = `/${MAG}`;
+    ctx.save(); ctx.font = `italic 700 ${rb.r * 0.65}px ${FONT}`; const sw = ctx.measureText(small).width; ctx.restore();
+    ctx.fillText(p.ammo, rb.x - sw / 2 + 4, rb.y - rb.r - 12);
+    ctx.font = `italic 700 ${rb.r * 0.65}px ${FONT}`; ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.textAlign = 'left';
+    ctx.fillText(small, rb.x - sw / 2 + 4, rb.y - rb.r - 12);
   }
 
-  // puutejuhtkangid
-  if (isTouch) for (const s of [sticks.L, sticks.R]) {
-    if (s.id === null) continue;
-    ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(s.ox, s.oy, STICK_R, 0, TAU); ctx.stroke();
-    ctx.fillStyle = 'rgba(255,255,255,.3)';
-    ctx.beginPath(); ctx.arc(s.ox + s.x * STICK_R, s.oy + s.y * STICK_R, 24, 0, TAU); ctx.fill();
+  // juhtkang (puuteekraanil)
+  if (isTouch && p.alive) {
+    const s = sticks.L, bx = s.id !== null ? s.ox : 110, by = s.id !== null ? s.oy : vh - 110, R = 70;
+    ctx.strokeStyle = 'rgba(255,255,255,.4)'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(bx, by, R, 0, TAU); ctx.stroke();
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.5)';
+    for (let i = 0; i < 4; i++) {
+      const a = i * Math.PI / 2, x = bx + Math.cos(a) * (R - 16), y = by + Math.sin(a) * (R - 16);
+      ctx.beginPath();
+      ctx.moveTo(x + Math.cos(a + 2.3) * 8, y + Math.sin(a + 2.3) * 8); ctx.lineTo(x, y);
+      ctx.lineTo(x + Math.cos(a - 2.3) * 8, y + Math.sin(a - 2.3) * 8); ctx.stroke();
+    }
+    ctx.fillStyle = 'rgba(140,165,230,.9)';
+    ctx.beginPath(); ctx.arc(bx + s.x * STICK_R, by + s.y * STICK_R, 28, 0, TAU); ctx.fill();
+    const r = sticks.R;
+    if (r.id !== null) {
+      ctx.strokeStyle = 'rgba(255,255,255,.3)'; ctx.beginPath(); ctx.arc(r.ox, r.oy, STICK_R, 0, TAU); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,90,100,.6)'; ctx.beginPath(); ctx.arc(r.ox + r.x * STICK_R, r.oy + r.y * STICK_R, 24, 0, TAU); ctx.fill();
+    }
   }
 }
 
@@ -722,11 +1036,11 @@ const overlay = document.getElementById('overlay');
 const ovTitle = document.getElementById('ovTitle'), ovText = document.getElementById('ovText');
 const ovKeys = document.getElementById('ovKeys'), ovBtn = document.getElementById('ovBtn');
 function showEnd() {
-  ovTitle.textContent = lastResult ? 'VÕIT!' : 'KAOTUS';
-  ovTitle.style.color = lastResult ? '#6be38a' : '#ff4a5a';
-  ovText.innerHTML = `<span class="score"><span style="color:#4aa3ff">${score[0]}</span> : <span style="color:#ff4a5a">${score[1]}</span></span>`;
+  ovTitle.textContent = lastResult ? 'VÕIT! #1' : `KAOTUS · KOHT #${lastPlace}`;
+  ovTitle.style.background = lastResult ? '#1f9e4a' : '#e8141f';
+  ovText.innerHTML = `<span class="score"><span style="color:#54d66a">${score[0]}</span> võitu · <span style="color:#ff4a5a">${score[1]}</span> kaotust</span>`;
   ovKeys.style.display = 'none';
-  ovBtn.textContent = 'JÄRGMINE RAUND';
+  ovBtn.textContent = 'UUESTI';
   overlay.classList.remove('hidden');
 }
 ovBtn.addEventListener('click', () => { overlay.classList.add('hidden'); startRound(); });
@@ -736,8 +1050,8 @@ let last = performance.now();
 function frame(now) {
   const dt = Math.min(0.033, (now - last) / 1000); last = now;
   update(dt);
-  if (state !== 'menu') render(now);
-  else { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#07090d'; ctx.fillRect(0, 0, cvs.width, cvs.height); }
+  if (state !== 'menu') render();
+  else { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, cvs.width, cvs.height); }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
